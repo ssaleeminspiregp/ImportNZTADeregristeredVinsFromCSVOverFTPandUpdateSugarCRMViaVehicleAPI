@@ -1,0 +1,35 @@
+﻿substitutions:
+  _REGION: australia-southeast1
+  _SERVICE: all_brands_nzta_deregistered_vins_sync
+  _REPO: nzta
+steps:
+  - name: gcr.io/cloud-builders/docker
+    args:
+      [
+        "build",
+        "-t",
+        "$_REGION-docker.pkg.dev/adh-data-utopia/$_REPO/$_SERVICE:$SHORT_SHA",
+        ".",
+      ]
+  - name: gcr.io/cloud-builders/docker
+    args:
+      [
+        "push",
+        "$_REGION-docker.pkg.dev/adh-data-utopia/$_REPO/$_SERVICE:$SHORT_SHA",
+      ]
+  - name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    entrypoint: gcloud
+    args:
+      [
+        "run","deploy","$_SERVICE",
+        "--image","$_REGION-docker.pkg.dev/adh-data-utopia/$_REPO/$_SERVICE:$SHORT_SHA",
+        "--region","$_REGION",
+        "--platform","managed",
+        "--allow-unauthenticated",
+        "--timeout","900",
+        "--max-instances","1",
+        "--set-env-vars",
+        "FTP_HOST=${FTP_HOST},FTP_PORT=${FTP_PORT},FTP_USERNAME=${FTP_USERNAME},FTP_PASSWORD=${FTP_PASSWORD},FTP_REMOTE_PATH=${FTP_REMOTE_PATH},GCS_BUCKET=${GCS_BUCKET},GCS_PREFIX=${GCS_PREFIX},SUGAR_BASE_URL=${SUGAR_BASE_URL},SUGAR_USERNAME=${SUGAR_USERNAME},SUGAR_PASSWORD=${SUGAR_PASSWORD},SUGAR_CLIENT_ID=${SUGAR_CLIENT_ID},SUGAR_CLIENT_SECRET=${SUGAR_CLIENT_SECRET},SUGAR_PLATFORM=${SUGAR_PLATFORM},TEAM_ID_HYUNDAI=${TEAM_ID_HYUNDAI},TEAM_ID_ISUZU=${TEAM_ID_ISUZU},TEAM_ID_RENAULT=${TEAM_ID_RENAULT}"
+      ]
+images:
+  - "$_REGION-docker.pkg.dev/adh-data-utopia/$_REPO/$_SERVICE:$SHORT_SHA"

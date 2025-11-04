@@ -1,0 +1,8 @@
+__pycache__/
+*.py[cod]
+.env
+.pytest_cache/
+*.log
+venv/
+.DS_Store
+RRA - MIA - DEREG Aug.csv
