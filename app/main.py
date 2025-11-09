@@ -152,7 +152,13 @@ def _process_single_file(
         for entry in staged_entries:
             record = entry.record
             try:
-                sugar.create_or_update_vehicle(record, team_id=None)
+                vehicle_id = sugar.find_vehicle_id(record.vin)
+                if not vehicle_id:
+                    message = "Vehicle not found in SugarCRM"
+                    stage_repo.record_error(entry.stage_id, message)
+                    failures.append({"vin": record.vin, "error": message})
+                    continue
+                sugar.update_vehicle(vehicle_id, record)
                 stage_repo.mark_pushed(entry.stage_id)
                 successes += 1
             except Exception as exc:  # noqa: BLE001

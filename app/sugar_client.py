@@ -1,4 +1,4 @@
-﻿import logging
+import logging
 from typing import Optional
 from urllib.parse import urljoin
 
@@ -45,24 +45,47 @@ class SugarCrmClient:
         self._access_token = response.json()["access_token"]
         logging.info("Authenticated to SugarCRM as %s", self.username)
 
-    def create_or_update_vehicle(self, record: VehicleRecord, team_id: Optional[str] = None) -> None:
+    def find_vehicle_id(self, vin: str) -> Optional[str]:
         if not self._access_token:
             raise RuntimeError("SugarCRM client not authenticated")
+        url = urljoin(self.base_url, "rest/v11_20/VHE_Vehicle")
+        params = {
+            "filter[0][vin_c][$equals]": vin,
+            "max_num": 1,
+        }
+        response = self.session.get(
+            url,
+            headers=self._auth_headers(),
+            params=params,
+            timeout=self.timeout,
+        )
+        response.raise_for_status()
+        payload = response.json()
+        records = payload.get("records") or []
+        if not records:
+            return None
+        return records[0].get("id")
 
-        url = urljoin(self.base_url, "rest/v11_20/VHE_Vehicle/createUpdate")
+    def update_vehicle(self, vehicle_id: str, record: VehicleRecord) -> None:
+        if not self._access_token:
+            raise RuntimeError("SugarCRM client not authenticated")
+        url = urljoin(self.base_url, f"rest/v11_20/VHE_Vehicle/{vehicle_id}")
         payload = {
-            "idField": "vin_c",
-            "idValue": record.vin,
-            "vin_c": record.vin,
             "vehicle_status_c": "Deregistered",
             "latest_dereg_date_c": record.dereg_date,
             "reg_plate_c": record.rego,
             "vehicle_make_c": record.make,
             "vehicle_model_c": record.model,
         }
-        if team_id:
-            payload["team_id"] = team_id
-
-        headers = {"Authorization": f"Bearer {self._access_token}"}
-        response = self.session.post(url, json=payload, headers=headers, timeout=self.timeout)
+        response = self.session.put(
+            url,
+            json=payload,
+            headers=self._auth_headers(),
+            timeout=self.timeout,
+        )
         response.raise_for_status()
+
+    def _auth_headers(self) -> dict[str, str]:
+        if not self._access_token:
+            raise RuntimeError("SugarCRM client not authenticated")
+        return {"Authorization": f"Bearer {self._access_token}"}
