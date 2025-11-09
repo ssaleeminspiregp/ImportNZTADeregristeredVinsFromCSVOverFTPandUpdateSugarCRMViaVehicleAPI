@@ -108,6 +108,22 @@ class StageRepository:
     def record_error(self, stage_id: str, error_message: str) -> None:
         self._update_status(stage_id, "pending", error_message)
 
+    def update_gcs_uri(self, old_uri: str, new_uri: str) -> None:
+        query = f"""
+        UPDATE `{self._table_id}`
+        SET gcs_uri = @new_uri
+        WHERE gcs_uri = @old_uri
+        """
+        self.client.query(
+            query,
+            job_config=bigquery.QueryJobConfig(
+                query_parameters=[
+                    bigquery.ScalarQueryParameter("new_uri", "STRING", new_uri),
+                    bigquery.ScalarQueryParameter("old_uri", "STRING", old_uri),
+                ]
+            ),
+        ).result()
+
     def _update_status(
         self, stage_id: str, status: str, error_message: Optional[str]
     ) -> None:

@@ -7,6 +7,18 @@ substitutions:
   _REPO: all_brands_nzta_deregistered_vins
 
 steps:
+  # 1) Guarantee the GCS landing bucket exists (no delete to retain audit files).
+  - name: gcr.io.google.com/cloudsdktool/cloud-sdk
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        set -euo pipefail
+        BUCKET="${GCS_BUCKET:-all_brands_nzta_deregistered_vins_temp_DO_NOT_DELETE}"
+        if ! gsutil ls -b "gs://${BUCKET}" >/dev/null 2>&1; then
+          gsutil mb -l $_REGION "gs://${BUCKET}"
+        fi
+
   # 1) Guarantee the Pub/Sub topic exists so later steps can bind to it.
   - name: gcr.io/google.com/cloudsdktool/cloud-sdk
     entrypoint: bash

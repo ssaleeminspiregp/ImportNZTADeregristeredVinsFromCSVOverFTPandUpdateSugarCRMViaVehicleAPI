@@ -39,7 +39,9 @@ class AppConfig:
     ftp_password: str
     ftp_remote_path: str
     gcs_bucket: str
-    gcs_prefix: str
+    gcs_raw_prefix: str
+    gcs_processed_prefix: str
+    gcs_error_prefix: str
     allowed_makes: List[str]
     sugar_base_url: str
     sugar_username: str
@@ -104,8 +106,12 @@ class AppConfig:
             ftp_username=ftp_username,
             ftp_password=ftp_password,
             ftp_remote_path=_require_env("FTP_REMOTE_PATH"),
-            gcs_bucket=os.getenv("GCS_BUCKET", "all_brands_nzta_deregistered_vins_temp_DO_NOT_DELETE"),
-            gcs_prefix=os.getenv("GCS_PREFIX", "raw"),
+            gcs_bucket=os.getenv(
+                "GCS_BUCKET", "all_brands_nzta_deregistered_vins_temp_DO_NOT_DELETE"
+            ),
+            gcs_raw_prefix=os.getenv("GCS_RAW_PREFIX", "raw"),
+            gcs_processed_prefix=os.getenv("GCS_PROCESSED_PREFIX", "processed"),
+            gcs_error_prefix=os.getenv("GCS_ERROR_PREFIX", "error"),
             allowed_makes=allowed_makes or ["HYUNDAI", "ISUZU", "RENAULT"],
             sugar_base_url=sugar_base_url,
             sugar_username=sugar_username,

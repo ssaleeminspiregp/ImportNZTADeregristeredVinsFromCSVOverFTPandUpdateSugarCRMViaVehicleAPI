@@ -46,58 +46,81 @@ def execute_pipeline(trigger_payload: Dict[str, Any]) -> Dict[str, Any]:
         temp_path = Path(temp_file.name)
     try:
         ftp.download(config.ftp_remote_path, temp_path)
-        storage_writer = StorageWriter(config.gcs_bucket, config.gcs_prefix)
-        gcs_uri = storage_writer.upload(temp_path)
-
-        processor = CsvProcessor(config.allowed_makes)
+        storage_writer = StorageWriter(
+            bucket=config.gcs_bucket,
+            raw_prefix=config.gcs_raw_prefix,
+            processed_prefix=config.gcs_processed_prefix,
+            error_prefix=config.gcs_error_prefix,
+        )
+        uploaded_file = None
+        stage_repo: StageRepository | None = None
         try:
-            records = list(processor.load(temp_path))
-        except HeaderValidationError as exc:
-            _handle_header_error(notifier, temp_path, exc)
-            raise
-        logging.info("Loaded %s eligible VIN records", len(records))
+            uploaded_file = storage_writer.upload_raw(temp_path)
+            gcs_uri = uploaded_file.uri
 
-        stage_repo = StageRepository(
-            dataset=config.bq_dataset,
-            table=config.bq_table,
-            location=config.bq_location,
-        )
-        stage_repo.ensure_resources()
-        staged_entries = stage_repo.stage_records(records, gcs_uri)
-
-        sugar = SugarCrmClient(
-            base_url=config.sugar_base_url,
-            username=config.sugar_username,
-            password=config.sugar_password,
-            client_id=config.sugar_client_id,
-            client_secret=config.sugar_client_secret,
-            platform=config.sugar_platform,
-            grant_type=config.sugar_grant_type,
-            timeout=config.sugar_timeout,
-        )
-        sugar.authenticate()
-
-        successes = 0
-        failures: List[Dict[str, str]] = []
-        for entry in staged_entries:
-            record = entry.record
+            processor = CsvProcessor(config.allowed_makes)
             try:
-                sugar.create_or_update_vehicle(record, team_id=None)
-                stage_repo.mark_pushed(entry.stage_id)
-                successes += 1
-            except Exception as exc:  # noqa: BLE001
-                logging.exception("Failed to sync VIN %s", record.vin)
-                stage_repo.record_error(entry.stage_id, str(exc))
-                failures.append({"vin": record.vin, "error": str(exc)})
+                records = list(processor.load(temp_path))
+            except HeaderValidationError as exc:
+                _handle_header_error(notifier, temp_path, exc)
+                raise
+            logging.info("Loaded %s eligible VIN records", len(records))
 
-        return {
-            "gcs_uri": gcs_uri,
-            "processed_records": len(records),
-            "successful_updates": successes,
-            "failed_updates": len(failures),
-            "failures": failures,
-            "trigger_payload": trigger_payload,
-        }
+            stage_repo = StageRepository(
+                dataset=config.bq_dataset,
+                table=config.bq_table,
+                location=config.bq_location,
+            )
+            stage_repo.ensure_resources()
+            staged_entries = stage_repo.stage_records(records, gcs_uri)
+
+            sugar = SugarCrmClient(
+                base_url=config.sugar_base_url,
+                username=config.sugar_username,
+                password=config.sugar_password,
+                client_id=config.sugar_client_id,
+                client_secret=config.sugar_client_secret,
+                platform=config.sugar_platform,
+                grant_type=config.sugar_grant_type,
+                timeout=config.sugar_timeout,
+            )
+            sugar.authenticate()
+
+            successes = 0
+            failures: List[Dict[str, str]] = []
+            for entry in staged_entries:
+                record = entry.record
+                try:
+                    sugar.create_or_update_vehicle(record, team_id=None)
+                    stage_repo.mark_pushed(entry.stage_id)
+                    successes += 1
+                except Exception as exc:  # noqa: BLE001
+                    logging.exception("Failed to sync VIN %s", record.vin)
+                    stage_repo.record_error(entry.stage_id, str(exc))
+                    failures.append({"vin": record.vin, "error": str(exc)})
+
+            summary = {
+                "gcs_uri": gcs_uri,
+                "processed_records": len(records),
+                "successful_updates": successes,
+                "failed_updates": len(failures),
+                "failures": failures,
+                "trigger_payload": trigger_payload,
+            }
+            processed_file = storage_writer.move_to_processed(uploaded_file)
+            uploaded_file = processed_file
+            summary["gcs_uri"] = processed_file.uri
+            if stage_repo:
+                stage_repo.update_gcs_uri(gcs_uri, processed_file.uri)
+            return summary
+        except Exception:
+            if uploaded_file:
+                previous_uri = uploaded_file.uri
+                error_file = storage_writer.move_to_error(uploaded_file)
+                uploaded_file = error_file
+                if stage_repo:
+                    stage_repo.update_gcs_uri(previous_uri, error_file.uri)
+            raise
     finally:
         if temp_path.exists():
             temp_path.unlink(missing_ok=True)
