@@ -4,7 +4,7 @@ substitutions:
   # Cloud Run service hosting the ingestion pipeline.
   _SERVICE: all_brands_nzta_deregistered_vins_sync
   # Artifact Registry repository used for versioned images.
-  _REPO: nzta
+  _REPO: all_brands_nzta_deregistered_vins
 
 steps:
   # 1) Guarantee the Pub/Sub topic exists so later steps can bind to it.
@@ -63,7 +63,7 @@ steps:
       ]
 
   # 6) Recreate the push subscription pointing to the fresh service URL.
-  - name: gcr.io/google.com/cloudsdktool/cloud-sdk
+  - name: gcr.io.google.com/cloudsdktool/cloud-sdk
     entrypoint: bash
     args:
       - -c
@@ -79,7 +79,7 @@ steps:
           --push-auth-service-account="ib4t-integration@adh-data-utopia.iam.gserviceaccount.com"
 
   # 7) Create or update the Scheduler job that publishes weekly triggers.
-  - name: gcr.io/google.com/cloudsdktool/cloud-sdk
+  - name: gcr.io.google.com/cloudsdktool/cloud-sdk
     entrypoint: bash
     args:
       - -c
