@@ -1,8 +1,13 @@
-﻿substitutions:
+substitutions:
+  # Region where Cloud Run, Scheduler, and Artifact Registry operate.
   _REGION: australia-southeast1
+  # Cloud Run service hosting the ingestion pipeline.
   _SERVICE: all_brands_nzta_deregistered_vins_sync
+  # Artifact Registry repository used for versioned images.
   _REPO: nzta
+
 steps:
+  # 1) Guarantee the Pub/Sub topic exists so later steps can bind to it.
   - name: gcr.io/google.com/cloudsdktool/cloud-sdk
     entrypoint: bash
     args:
@@ -11,6 +16,8 @@ steps:
         set -euo pipefail
         gcloud pubsub topics describe all_brands_nzta_deregistered_vins_sync_trigger >/dev/null 2>&1 || \
         gcloud pubsub topics create all_brands_nzta_deregistered_vins_sync_trigger
+
+  # 2) Build the Cloud Run container image from the current workspace.
   - name: gcr.io/cloud-builders/docker
     args:
       [
@@ -19,12 +26,16 @@ steps:
         "$_REGION-docker.pkg.dev/adh-data-utopia/$_REPO/$_SERVICE:$SHORT_SHA",
         ".",
       ]
+
+  # 3) Push the image to Artifact Registry so Cloud Run can pull it.
   - name: gcr.io/cloud-builders/docker
     args:
       [
         "push",
         "$_REGION-docker.pkg.dev/adh-data-utopia/$_REPO/$_SERVICE:$SHORT_SHA",
       ]
+
+  # 4) Deploy (or update) the Cloud Run service with secret-driven env vars.
   - name: gcr.io/google.com/cloudsdktool/cloud-sdk
     entrypoint: gcloud
     args:
@@ -39,6 +50,8 @@ steps:
         "--set-env-vars",
         "FTP_CONFIG_SECRET=${FTP_CONFIG_SECRET},SUGAR_CONFIG_SECRET=${SUGAR_CONFIG_SECRET},FTP_REMOTE_PATH=${FTP_REMOTE_PATH},GCS_BUCKET=${GCS_BUCKET},GCS_PREFIX=${GCS_PREFIX},ALLOWED_MAKES=${ALLOWED_MAKES},BQ_STAGE_DATASET=${BQ_STAGE_DATASET},BQ_STAGE_TABLE=${BQ_STAGE_TABLE},BQ_STAGE_LOCATION=${BQ_STAGE_LOCATION},EMAIL_SENDER=${EMAIL_SENDER},EMAIL_RECIPIENTS=${EMAIL_RECIPIENTS},SMTP_HOST=${SMTP_HOST},SMTP_PORT=${SMTP_PORT},SMTP_USERNAME=${SMTP_USERNAME},SMTP_PASSWORD=${SMTP_PASSWORD},SMTP_USE_TLS=${SMTP_USE_TLS},SMTP_TIMEOUT=${SMTP_TIMEOUT}"
       ]
+
+  # 5) Let the Pub/Sub push identity invoke the Cloud Run endpoint.
   - name: gcr.io/google.com/cloudsdktool/cloud-sdk
     entrypoint: gcloud
     args:
@@ -48,6 +61,8 @@ steps:
         "--member","serviceAccount:ib4t-integration@adh-data-utopia.iam.gserviceaccount.com",
         "--role","roles/run.invoker"
       ]
+
+  # 6) Recreate the push subscription pointing to the fresh service URL.
   - name: gcr.io/google.com/cloudsdktool/cloud-sdk
     entrypoint: bash
     args:
@@ -62,6 +77,8 @@ steps:
           --topic=all_brands_nzta_deregistered_vins_sync_trigger \
           --push-endpoint="${SERVICE_URL}/" \
           --push-auth-service-account="ib4t-integration@adh-data-utopia.iam.gserviceaccount.com"
+
+  # 7) Create or update the Scheduler job that publishes weekly triggers.
   - name: gcr.io/google.com/cloudsdktool/cloud-sdk
     entrypoint: bash
     args:
@@ -69,7 +86,7 @@ steps:
       - |
         set -euo pipefail
         JOB_NAME="all_brands_nzta_deregistered_vins_weekly"
-        SCHEDULE="0 3 * * 2"
+        SCHEDULE="0 3 * * 2"  # Tuesdays at 03:00 NZT.
         TZ="Pacific/Auckland"
         if gcloud scheduler jobs describe ${JOB_NAME} >/dev/null 2>&1; then
           gcloud scheduler jobs update pubsub ${JOB_NAME} \
@@ -84,5 +101,7 @@ steps:
             --topic=all_brands_nzta_deregistered_vins_sync_trigger \
             --message-body="{}"
         fi
+
 images:
+  # Artifact reference recorded for reproducibility/auditing.
   - "$_REGION-docker.pkg.dev/adh-data-utopia/$_REPO/$_SERVICE:$SHORT_SHA"
