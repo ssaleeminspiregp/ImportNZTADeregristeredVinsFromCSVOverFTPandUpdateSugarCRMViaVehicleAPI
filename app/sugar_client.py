@@ -73,13 +73,10 @@ class SugarCrmClient:
         payload = {
             "vehicle_status_c": "Deregistered",
             "latest_dereg_date_c": record.dereg_date,
-            "reg_plate_c": record.rego,
-            "vehicle_make_c": record.make,
-            "vehicle_model_c": record.model,
         }
         response = self.session.put(
             url,
-            json=payload,
+            params=payload,
             headers=self._auth_headers(),
             timeout=self.timeout,
         )
