@@ -42,88 +42,71 @@ def execute_pipeline(trigger_payload: Dict[str, Any]) -> Dict[str, Any]:
         block_size=config.ftp_block_size,
     )
 
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".csv") as temp_file:
-        temp_path = Path(temp_file.name)
+    storage_writer = StorageWriter(
+        bucket=config.gcs_bucket,
+        raw_prefix=config.gcs_raw_prefix,
+        processed_prefix=config.gcs_processed_prefix,
+        error_prefix=config.gcs_error_prefix,
+    )
+    stage_repo = StageRepository(
+        dataset=config.bq_dataset,
+        table=config.bq_table,
+        location=config.bq_location,
+    )
+    stage_repo.ensure_resources()
+
+    processed_reports: List[Dict[str, Any]] = []
+    temp_dir = Path(tempfile.mkdtemp())
     try:
-        ftp.download(config.ftp_remote_path, temp_path)
-        storage_writer = StorageWriter(
-            bucket=config.gcs_bucket,
-            raw_prefix=config.gcs_raw_prefix,
-            processed_prefix=config.gcs_processed_prefix,
-            error_prefix=config.gcs_error_prefix,
+        sugar = SugarCrmClient(
+            base_url=config.sugar_base_url,
+            username=config.sugar_username,
+            password=config.sugar_password,
+            client_id=config.sugar_client_id,
+            client_secret=config.sugar_client_secret,
+            platform=config.sugar_platform,
+            grant_type=config.sugar_grant_type,
+            timeout=config.sugar_timeout,
         )
-        uploaded_file = None
-        stage_repo: StageRepository | None = None
-        try:
-            uploaded_file = storage_writer.upload_raw(temp_path)
-            gcs_uri = uploaded_file.uri
+        sugar.authenticate()
 
-            processor = CsvProcessor(config.allowed_makes)
+        for filename, local_path in ftp.iter_downloads(
+            remote_path=config.ftp_remote_path,
+            destination_dir=temp_dir,
+            pattern=config.ftp_file_pattern,
+        ):
+            logging.info("Processing FTP file %s", filename)
             try:
-                records = list(processor.load(temp_path))
-            except HeaderValidationError as exc:
-                _handle_header_error(notifier, temp_path, exc)
-                raise
-            logging.info("Loaded %s eligible VIN records", len(records))
-
-            stage_repo = StageRepository(
-                dataset=config.bq_dataset,
-                table=config.bq_table,
-                location=config.bq_location,
-            )
-            stage_repo.ensure_resources()
-            staged_entries = stage_repo.stage_records(records, gcs_uri)
-
-            sugar = SugarCrmClient(
-                base_url=config.sugar_base_url,
-                username=config.sugar_username,
-                password=config.sugar_password,
-                client_id=config.sugar_client_id,
-                client_secret=config.sugar_client_secret,
-                platform=config.sugar_platform,
-                grant_type=config.sugar_grant_type,
-                timeout=config.sugar_timeout,
-            )
-            sugar.authenticate()
-
-            successes = 0
-            failures: List[Dict[str, str]] = []
-            for entry in staged_entries:
-                record = entry.record
-                try:
-                    sugar.create_or_update_vehicle(record, team_id=None)
-                    stage_repo.mark_pushed(entry.stage_id)
-                    successes += 1
-                except Exception as exc:  # noqa: BLE001
-                    logging.exception("Failed to sync VIN %s", record.vin)
-                    stage_repo.record_error(entry.stage_id, str(exc))
-                    failures.append({"vin": record.vin, "error": str(exc)})
-
-            summary = {
-                "gcs_uri": gcs_uri,
-                "processed_records": len(records),
-                "successful_updates": successes,
-                "failed_updates": len(failures),
-                "failures": failures,
-                "trigger_payload": trigger_payload,
-            }
-            processed_file = storage_writer.move_to_processed(uploaded_file)
-            uploaded_file = processed_file
-            summary["gcs_uri"] = processed_file.uri
-            if stage_repo:
-                stage_repo.update_gcs_uri(gcs_uri, processed_file.uri)
-            return summary
-        except Exception:
-            if uploaded_file:
-                previous_uri = uploaded_file.uri
-                error_file = storage_writer.move_to_error(uploaded_file)
-                uploaded_file = error_file
-                if stage_repo:
-                    stage_repo.update_gcs_uri(previous_uri, error_file.uri)
-            raise
+                report = _process_single_file(
+                    local_path=local_path,
+                    storage_writer=storage_writer,
+                    stage_repo=stage_repo,
+                    config=config,
+                    notifier=notifier,
+                    trigger_payload=trigger_payload,
+                    sugar=sugar,
+                )
+                report["source_filename"] = filename
+                report["status"] = "success"
+                processed_reports.append(report)
+            except Exception as exc:  # noqa: BLE001
+                logging.exception("Failed to process file %s", filename)
+                processed_reports.append(
+                    {
+                        "source_filename": filename,
+                        "status": "error",
+                        "error": str(exc),
+                    }
+                )
     finally:
-        if temp_path.exists():
-            temp_path.unlink(missing_ok=True)
+        for path in temp_dir.glob("*"):
+            path.unlink(missing_ok=True)
+        temp_dir.rmdir()
+
+    return {
+        "files_processed": len(processed_reports),
+        "file_reports": processed_reports,
+    }
 
 
 def _decode_pubsub(body: Dict[str, Any] | None) -> Dict[str, Any]:
@@ -139,6 +122,66 @@ def _decode_pubsub(body: Dict[str, Any] | None) -> Dict[str, Any]:
         return {"raw": decoded}
 
 
+def _process_single_file(
+    local_path: Path,
+    storage_writer: StorageWriter,
+    stage_repo: StageRepository,
+    config: AppConfig,
+    notifier: EmailNotifier | None,
+    trigger_payload: Dict[str, Any],
+    sugar: SugarCrmClient,
+) -> Dict[str, Any]:
+    uploaded_file = storage_writer.upload_raw(local_path)
+    original_uri = uploaded_file.uri
+    staged_entries = []
+    staged = False
+    try:
+        processor = CsvProcessor(config.allowed_makes)
+        try:
+            records = list(processor.load(local_path))
+        except HeaderValidationError as exc:
+            _handle_header_error(notifier, local_path, exc)
+            raise
+
+        logging.info("Loaded %s eligible VIN records from %s", len(records), local_path.name)
+        staged_entries = stage_repo.stage_records(records, original_uri)
+        staged = bool(staged_entries)
+
+        successes = 0
+        failures: List[Dict[str, str]] = []
+        for entry in staged_entries:
+            record = entry.record
+            try:
+                sugar.create_or_update_vehicle(record, team_id=None)
+                stage_repo.mark_pushed(entry.stage_id)
+                successes += 1
+            except Exception as exc:  # noqa: BLE001
+                logging.exception("Failed to sync VIN %s", record.vin)
+                stage_repo.record_error(entry.stage_id, str(exc))
+                failures.append({"vin": record.vin, "error": str(exc)})
+
+        summary = {
+            "gcs_uri": original_uri,
+            "processed_records": len(records),
+            "successful_updates": successes,
+            "failed_updates": len(failures),
+            "failures": failures,
+            "trigger_payload": trigger_payload,
+        }
+
+        processed_file = storage_writer.move_to_processed(uploaded_file)
+        summary["gcs_uri"] = processed_file.uri
+        if staged:
+            stage_repo.update_gcs_uri(original_uri, processed_file.uri)
+        return summary
+    except Exception:
+        if uploaded_file:
+            error_file = storage_writer.move_to_error(uploaded_file)
+            if staged:
+                stage_repo.update_gcs_uri(original_uri, error_file.uri)
+        raise
+
+
 def _handle_header_error(
     notifier: EmailNotifier | None, source_path: Path, error: HeaderValidationError
 ) -> None:
@@ -150,14 +193,12 @@ def _handle_header_error(
     )
     logging.error(message)
     if not notifier:
-        logging.error(
-            "Unable to send notification email; SMTP settings not configured"
-        )
+        logging.error("Unable to send notification email; SMTP settings not configured")
         return
     try:
         notifier.send(
             subject="NZTA Deregistered VIN ingest failed - header validation",
             body=message,
         )
-    except Exception:
+    except Exception:  # noqa: BLE001
         logging.exception("Failed to send header validation alert email")

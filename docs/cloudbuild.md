@@ -41,7 +41,7 @@ Stores a reference to the exact Artifact Registry image built (`$SHORT_SHA` tag)
 ### Required Substitutions (set per build/trigger)
 
 - `FTP_CONFIG_SECRET`, `SUGAR_CONFIG_SECRET`
-- `FTP_REMOTE_PATH`
+- `FTP_REMOTE_PATH` (directory path) and `FTP_FILE_PATTERN` (defaults to `*.csv`)
 - `GCS_BUCKET` (defaults to `all_brands_nzta_deregistered_vins_temp_DO_NOT_DELETE`), plus optional overrides for `GCS_RAW_PREFIX`, `GCS_PROCESSED_PREFIX`, `GCS_ERROR_PREFIX`
 - `ALLOWED_MAKES`
 - `BQ_STAGE_DATASET`, `BQ_STAGE_TABLE`, `BQ_STAGE_LOCATION`

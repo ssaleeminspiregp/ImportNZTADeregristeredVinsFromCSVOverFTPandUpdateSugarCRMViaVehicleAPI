@@ -38,6 +38,8 @@ class AppConfig:
     ftp_username: str
     ftp_password: str
     ftp_remote_path: str
+    ftp_file_pattern: str
+    ftp_file_pattern: str
     gcs_bucket: str
     gcs_raw_prefix: str
     gcs_processed_prefix: str
@@ -106,6 +108,7 @@ class AppConfig:
             ftp_username=ftp_username,
             ftp_password=ftp_password,
             ftp_remote_path=_require_env("FTP_REMOTE_PATH"),
+            ftp_file_pattern=os.getenv("FTP_FILE_PATTERN", "*.csv"),
             gcs_bucket=os.getenv(
                 "GCS_BUCKET", "all_brands_nzta_deregistered_vins_temp_DO_NOT_DELETE"
             ),
