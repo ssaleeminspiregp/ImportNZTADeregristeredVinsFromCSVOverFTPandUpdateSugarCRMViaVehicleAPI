@@ -52,7 +52,7 @@ class StageRepository:
                 bigquery.SchemaField("vin", "STRING"),
                 bigquery.SchemaField("vehicle_make", "STRING"),
                 bigquery.SchemaField("vehicle_model", "STRING"),
-                bigquery.SchemaField("dereg_date", "STRING"),
+                bigquery.SchemaField("dereg_date", "DATE"),
                 bigquery.SchemaField("reg_plate", "STRING"),
                 bigquery.SchemaField("status", "STRING"),
                 bigquery.SchemaField("date_created", "TIMESTAMP"),
@@ -61,6 +61,11 @@ class StageRepository:
                 bigquery.SchemaField("error_message", "STRING"),
             ]
             table = bigquery.Table(table_ref, schema=schema)
+            table.time_partitioning = bigquery.TimePartitioning(
+                type_=bigquery.TimePartitioningType.DAY,
+                field="dereg_date",
+            )
+            table.clustering_fields = ["vin"]
             self.client.create_table(table)
             logging.info("Created BigQuery table %s", self._table_id)
 
@@ -80,7 +85,7 @@ class StageRepository:
                     "vin": record.vin,
                     "vehicle_make": record.make,
                     "vehicle_model": record.model,
-                    "dereg_date": record.dereg_date,
+                    "dereg_date": record.dereg_date or None,
                     "reg_plate": record.rego,
                     "status": "pending",
                     "date_created": now,

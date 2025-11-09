@@ -3,6 +3,14 @@
   _SERVICE: all_brands_nzta_deregistered_vins_sync
   _REPO: nzta
 steps:
+  - name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        set -euo pipefail
+        gcloud pubsub topics describe all_brands_nzta_deregistered_vins_sync_trigger >/dev/null 2>&1 || \
+        gcloud pubsub topics create all_brands_nzta_deregistered_vins_sync_trigger
   - name: gcr.io/cloud-builders/docker
     args:
       [
@@ -29,7 +37,52 @@ steps:
         "--timeout","900",
         "--max-instances","1",
         "--set-env-vars",
-        "FTP_HOST=${FTP_HOST},FTP_PORT=${FTP_PORT},FTP_USERNAME=${FTP_USERNAME},FTP_PASSWORD=${FTP_PASSWORD},FTP_REMOTE_PATH=${FTP_REMOTE_PATH},GCS_BUCKET=${GCS_BUCKET},GCS_PREFIX=${GCS_PREFIX},SUGAR_BASE_URL=${SUGAR_BASE_URL},SUGAR_USERNAME=${SUGAR_USERNAME},SUGAR_PASSWORD=${SUGAR_PASSWORD},SUGAR_CLIENT_ID=${SUGAR_CLIENT_ID},SUGAR_CLIENT_SECRET=${SUGAR_CLIENT_SECRET},SUGAR_PLATFORM=${SUGAR_PLATFORM},TEAM_ID_HYUNDAI=${TEAM_ID_HYUNDAI},TEAM_ID_ISUZU=${TEAM_ID_ISUZU},TEAM_ID_RENAULT=${TEAM_ID_RENAULT}"
+        "FTP_CONFIG_SECRET=${FTP_CONFIG_SECRET},SUGAR_CONFIG_SECRET=${SUGAR_CONFIG_SECRET},FTP_REMOTE_PATH=${FTP_REMOTE_PATH},GCS_BUCKET=${GCS_BUCKET},GCS_PREFIX=${GCS_PREFIX},ALLOWED_MAKES=${ALLOWED_MAKES},BQ_STAGE_DATASET=${BQ_STAGE_DATASET},BQ_STAGE_TABLE=${BQ_STAGE_TABLE},BQ_STAGE_LOCATION=${BQ_STAGE_LOCATION},EMAIL_SENDER=${EMAIL_SENDER},EMAIL_RECIPIENTS=${EMAIL_RECIPIENTS},SMTP_HOST=${SMTP_HOST},SMTP_PORT=${SMTP_PORT},SMTP_USERNAME=${SMTP_USERNAME},SMTP_PASSWORD=${SMTP_PASSWORD},SMTP_USE_TLS=${SMTP_USE_TLS},SMTP_TIMEOUT=${SMTP_TIMEOUT}"
       ]
+  - name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    entrypoint: gcloud
+    args:
+      [
+        "run","services","add-iam-policy-binding","$_SERVICE",
+        "--region","$_REGION",
+        "--member","serviceAccount:ib4t-integration@adh-data-utopia.iam.gserviceaccount.com",
+        "--role","roles/run.invoker"
+      ]
+  - name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        set -euo pipefail
+        SERVICE_URL="$(gcloud run services describe $_SERVICE --region $_REGION --format='value(status.url)')"
+        if gcloud pubsub subscriptions describe all_brands_nzta_deregistered_vins_runner >/dev/null 2>&1; then
+          gcloud pubsub subscriptions delete all_brands_nzta_deregistered_vins_runner --quiet
+        fi
+        gcloud pubsub subscriptions create all_brands_nzta_deregistered_vins_runner \
+          --topic=all_brands_nzta_deregistered_vins_sync_trigger \
+          --push-endpoint="${SERVICE_URL}/" \
+          --push-auth-service-account="ib4t-integration@adh-data-utopia.iam.gserviceaccount.com"
+  - name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        set -euo pipefail
+        JOB_NAME="all_brands_nzta_deregistered_vins_weekly"
+        SCHEDULE="0 3 * * 2"
+        TZ="Pacific/Auckland"
+        if gcloud scheduler jobs describe ${JOB_NAME} >/dev/null 2>&1; then
+          gcloud scheduler jobs update pubsub ${JOB_NAME} \
+            --schedule="${SCHEDULE}" \
+            --time-zone="${TZ}" \
+            --topic=all_brands_nzta_deregistered_vins_sync_trigger \
+            --message-body="{}"
+        else
+          gcloud scheduler jobs create pubsub ${JOB_NAME} \
+            --schedule="${SCHEDULE}" \
+            --time-zone="${TZ}" \
+            --topic=all_brands_nzta_deregistered_vins_sync_trigger \
+            --message-body="{}"
+        fi
 images:
   - "$_REGION-docker.pkg.dev/adh-data-utopia/$_REPO/$_SERVICE:$SHORT_SHA"

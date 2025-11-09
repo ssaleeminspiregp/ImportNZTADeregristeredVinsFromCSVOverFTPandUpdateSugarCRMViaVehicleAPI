@@ -7,6 +7,25 @@ from typing import Iterable, Iterator
 
 
 @dataclass
+EXPECTED_HEADERS = [
+    "VEHICLE_MAKE",
+    "VEHICLE_MODEL",
+    "VIN",
+    "DEREG_DATE",
+    "REGNO",
+]
+
+
+class HeaderValidationError(Exception):
+    def __init__(self, actual: list[str] | None) -> None:
+        self.actual = actual or []
+        message = (
+            "Invalid CSV header. "
+            f"Expected {EXPECTED_HEADERS}, received {self.actual}"
+        )
+        super().__init__(message)
+
+
 class VehicleRecord:
     make: str
     model: str
@@ -22,6 +41,7 @@ class CsvProcessor:
     def load(self, source: Path) -> Iterator[VehicleRecord]:
         with open(source, newline="", encoding="utf-8") as handle:
             reader = csv.DictReader(handle)
+            self._validate_headers(reader.fieldnames)
             for row in reader:
                 make = (row.get("VEHICLE_MAKE") or "").strip().upper()
                 if make not in self.allowed_makes:
@@ -51,5 +71,10 @@ class CsvProcessor:
         try:
             return datetime.fromisoformat(raw).strftime("%Y-%m-%d")
         except ValueError:
-            logging.warning("Unrecognized date %s; passing through", raw)
-            return raw
+            logging.warning("Unrecognized date %s; omitting value", raw)
+            return ""
+
+    @staticmethod
+    def _validate_headers(headers: list[str] | None) -> None:
+        if headers is None or list(headers) != EXPECTED_HEADERS:
+            raise HeaderValidationError(headers)

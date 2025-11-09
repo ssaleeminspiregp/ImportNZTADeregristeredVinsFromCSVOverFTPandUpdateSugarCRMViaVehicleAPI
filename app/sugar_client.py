@@ -8,14 +8,24 @@ from app.csv_processor import VehicleRecord
 
 
 class SugarCrmClient:
-    def __init__(self, base_url: str, username: str, password: str,
-                 client_id: str, client_secret: str, platform: str, timeout: int) -> None:
+    def __init__(
+        self,
+        base_url: str,
+        username: str,
+        password: str,
+        client_id: str,
+        client_secret: str,
+        platform: str,
+        grant_type: str,
+        timeout: int,
+    ) -> None:
         self.base_url = base_url.rstrip("/") + "/"
         self.username = username
         self.password = password
         self.client_id = client_id
         self.client_secret = client_secret
         self.platform = platform
+        self.grant_type = grant_type
         self.timeout = timeout
         self.session = requests.Session()
         self._access_token: Optional[str] = None
@@ -23,7 +33,7 @@ class SugarCrmClient:
     def authenticate(self) -> None:
         token_url = urljoin(self.base_url, "rest/v11_6/oauth2/token")
         payload = {
-            "grant_type": "password",
+            "grant_type": self.grant_type or "password",
             "client_id": self.client_id,
             "client_secret": self.client_secret,
             "username": self.username,

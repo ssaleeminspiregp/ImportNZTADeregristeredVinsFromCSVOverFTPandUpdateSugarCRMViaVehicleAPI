@@ -9,8 +9,9 @@ from typing import Any, Dict, List
 from flask import Flask, jsonify, request
 
 from app.config import AppConfig
-from app.csv_processor import CsvProcessor
+from app.csv_processor import CsvProcessor, HeaderValidationError, EXPECTED_HEADERS
 from app.ftp_client import FtpDownloader
+from app.notifier import EmailNotifier, build_notifier
 from app.stage_repository import StageRepository
 from app.storage_writer import StorageWriter
 from app.sugar_client import SugarCrmClient
@@ -31,6 +32,7 @@ def entrypoint():
 
 def execute_pipeline(trigger_payload: Dict[str, Any]) -> Dict[str, Any]:
     config = AppConfig.from_env()
+    notifier = build_notifier(config.email)
     ftp = FtpDownloader(
         host=config.ftp_host,
         port=config.ftp_port,
@@ -48,7 +50,11 @@ def execute_pipeline(trigger_payload: Dict[str, Any]) -> Dict[str, Any]:
         gcs_uri = storage_writer.upload(temp_path)
 
         processor = CsvProcessor(config.allowed_makes)
-        records = list(processor.load(temp_path))
+        try:
+            records = list(processor.load(temp_path))
+        except HeaderValidationError as exc:
+            _handle_header_error(notifier, temp_path, exc)
+            raise
         logging.info("Loaded %s eligible VIN records", len(records))
 
         stage_repo = StageRepository(
@@ -66,6 +72,7 @@ def execute_pipeline(trigger_payload: Dict[str, Any]) -> Dict[str, Any]:
             client_id=config.sugar_client_id,
             client_secret=config.sugar_client_secret,
             platform=config.sugar_platform,
+            grant_type=config.sugar_grant_type,
             timeout=config.sugar_timeout,
         )
         sugar.authenticate()
@@ -74,9 +81,8 @@ def execute_pipeline(trigger_payload: Dict[str, Any]) -> Dict[str, Any]:
         failures: List[Dict[str, str]] = []
         for entry in staged_entries:
             record = entry.record
-            team_id = config.team_ids.get(record.make)
             try:
-                sugar.create_or_update_vehicle(record, team_id=team_id)
+                sugar.create_or_update_vehicle(record, team_id=None)
                 stage_repo.mark_pushed(entry.stage_id)
                 successes += 1
             except Exception as exc:  # noqa: BLE001
@@ -108,3 +114,27 @@ def _decode_pubsub(body: Dict[str, Any] | None) -> Dict[str, Any]:
         return json.loads(decoded)
     except json.JSONDecodeError:
         return {"raw": decoded}
+
+
+def _handle_header_error(
+    notifier: EmailNotifier | None, source_path: Path, error: HeaderValidationError
+) -> None:
+    message = (
+        "NZTA deregistered VIN ingestion failed due to an invalid CSV header.\n\n"
+        f"File: {source_path}\n"
+        f"Expected: {', '.join(EXPECTED_HEADERS)}\n"
+        f"Received: {', '.join(error.actual) if error.actual else 'None'}\n"
+    )
+    logging.error(message)
+    if not notifier:
+        logging.error(
+            "Unable to send notification email; SMTP settings not configured"
+        )
+        return
+    try:
+        notifier.send(
+            subject="NZTA Deregistered VIN ingest failed - header validation",
+            body=message,
+        )
+    except Exception:
+        logging.exception("Failed to send header validation alert email")
