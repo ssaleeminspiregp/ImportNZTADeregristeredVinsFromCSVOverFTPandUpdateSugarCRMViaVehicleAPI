@@ -104,7 +104,7 @@ class AppConfig:
             ftp_username=ftp_username,
             ftp_password=ftp_password,
             ftp_remote_path=_require_env("FTP_REMOTE_PATH"),
-            gcs_bucket=_require_env("GCS_BUCKET"),
+            gcs_bucket=os.getenv("GCS_BUCKET", "all_brands_nzta_deregistered_vins_temp_DO_NOT_DELETE"),
             gcs_prefix=os.getenv("GCS_PREFIX", "raw"),
             allowed_makes=allowed_makes or ["HYUNDAI", "ISUZU", "RENAULT"],
             sugar_base_url=sugar_base_url,
