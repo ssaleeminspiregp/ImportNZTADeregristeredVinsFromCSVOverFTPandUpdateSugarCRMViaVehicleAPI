@@ -40,11 +40,11 @@ Stores a reference to the exact Artifact Registry image built (`$SHORT_SHA` tag)
 
 ### Required Substitutions (set per build/trigger)
 
-- `FTP_CONFIG_SECRET`, `SUGAR_CONFIG_SECRET`
-- `FTP_REMOTE_PATH` (directory path) and `FTP_FILE_PATTERN` (defaults to `*.csv`)
-- `GCS_BUCKET` (defaults to `all_brands_nzta_deregistered_vins_temp_DO_NOT_DELETE`), plus optional overrides for `GCS_RAW_PREFIX`, `GCS_PROCESSED_PREFIX`, `GCS_ERROR_PREFIX`
-- `ALLOWED_MAKES`
-- `BQ_STAGE_DATASET`, `BQ_STAGE_TABLE`, `BQ_STAGE_LOCATION`
+- `_FTP_CONFIG_SECRET`, `_SUGAR_CONFIG_SECRET`
+- `_FTP_REMOTE_PATH` (directory path) and `_FTP_FILE_PATTERN` (defaults to `*.csv`)
+- `_GCS_BUCKET` (defaults to `all-brands-nzta-deregistered-vins-temp-do-not-delete`), plus optional overrides for `_GCS_RAW_PREFIX`, `_GCS_PROCESSED_PREFIX`, `_GCS_ERROR_PREFIX`
+- `_ALLOWED_MAKES`
+- `_BQ_STAGE_DATASET`, `_BQ_STAGE_TABLE`, `_BQ_STAGE_LOCATION`
 - Optional email/SMTP variables if notifications are enabled
 
 ### Runtime IAM Expectations
