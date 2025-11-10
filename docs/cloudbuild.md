@@ -52,4 +52,8 @@ Stores a reference to the exact Artifact Registry image built (`$SHORT_SHA` tag)
 - Cloud Build SA: `roles/run.admin`, `roles/iam.serviceAccountUser`, `roles/pubsub.admin`, `roles/cloudscheduler.admin`, `roles/storage.admin`, `roles/artifactregistry.writer`.
 - Runtime SA (`ib4t-integration@adh-data-utopia.iam.gserviceaccount.com`): `roles/run.invoker` (granted in step 6), plus the BigQuery/Secret Manager roles already configured.
 
+### Logging
+
+- All builds write logs to `gs://ib4t-integration-adh-data-utopia-cloudbuild-logs` (configured via the `logsBucket` field) and the logging option is set to `GCS_ONLY`, satisfying Cloud Build’s requirement for custom service accounts.
+
 With this setup, a single `gcloud builds submit` (or trigger) builds, deploys, and wires the weekly automation without manual intervention.
