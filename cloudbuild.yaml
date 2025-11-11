@@ -18,8 +18,8 @@ steps:
       - |
         set -euo pipefail
         BUCKET="${_GCS_BUCKET:-all-brands-nzta-deregistered-vins-temp-do-not-delete}"
-        if ! gsutil ls -b "gs://${BUCKET}" >/dev/null 2>&1; then
-          gsutil mb -l $_REGION "gs://${BUCKET}"
+        if ! gsutil ls -b "gs://$${BUCKET}" >/dev/null 2>&1; then
+          gsutil mb -l $_REGION "gs://$${BUCKET}"
         fi
 
   # 1) Guarantee the Pub/Sub topic exists so later steps can bind to it.
