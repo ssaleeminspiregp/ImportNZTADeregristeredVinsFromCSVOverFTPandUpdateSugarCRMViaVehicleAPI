@@ -13,7 +13,7 @@ options:
 
 steps:
   # 1) Guarantee the GCS landing bucket exists (no delete to retain audit files).
-  - name: gcr.io.google.com/cloudsdktool/cloud-sdk
+  - name: gcr.io/google.com/cloudsdktool/cloud-sdk
     entrypoint: bash
     args:
       - -c
