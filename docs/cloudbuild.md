@@ -54,6 +54,6 @@ Stores a reference to the exact Artifact Registry image built (`$SHORT_SHA` tag)
 
 ### Logging
 
-- Logging is set to `NONE`, so Cloud Build writes logs solely to Cloud Logging (disabled) and does not require a logs bucket when using the custom service account.
+- Builds send logs exclusively to `gs://ib4t-integration-adh-data-utopia-cloudbuild-logs` (`logsBucket` + `options.logging: GCS_ONLY`). Review build output there anytime, and grant the runtime service account write access as needed.
 
 With this setup, a single `gcloud builds submit` (or trigger) builds, deploys, and wires the weekly automation without manual intervention.

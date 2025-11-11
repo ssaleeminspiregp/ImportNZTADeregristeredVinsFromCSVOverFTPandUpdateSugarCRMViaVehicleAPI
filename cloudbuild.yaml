@@ -6,8 +6,10 @@ substitutions:
   # Artifact Registry repository used for versioned images.
   _REPO: all_brands_nzta_deregistered_vins
 
+logsBucket: gs://ib4t-integration-adh-data-utopia-cloudbuild-logs
+
 options:
-  logging: NONE
+  logging: GCS_ONLY
 
 steps:
   # 1) Guarantee the GCS landing bucket exists (no delete to retain audit files).
