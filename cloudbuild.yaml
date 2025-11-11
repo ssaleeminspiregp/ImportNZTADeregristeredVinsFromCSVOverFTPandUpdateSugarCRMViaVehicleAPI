@@ -105,14 +105,14 @@ steps:
         TZ="Pacific/Auckland"
         if gcloud scheduler jobs describe $${JOB_NAME} >/dev/null 2>&1; then
           gcloud scheduler jobs update pubsub $${JOB_NAME} \
-            --schedule="${SCHEDULE}" \
-            --time-zone="${TZ}" \
+            --schedule="$${SCHEDULE}" \
+            --time-zone="$${TZ}" \
             --topic=all_brands_nzta_deregistered_vins_sync_trigger \
             --message-body="{}"
         else
           gcloud scheduler jobs create pubsub $${JOB_NAME} \
-            --schedule="${SCHEDULE}" \
-            --time-zone="${TZ}" \
+            --schedule="$${SCHEDULE}" \
+            --time-zone="$${TZ}" \
             --topic=all_brands_nzta_deregistered_vins_sync_trigger \
             --message-body="{}"
         fi
