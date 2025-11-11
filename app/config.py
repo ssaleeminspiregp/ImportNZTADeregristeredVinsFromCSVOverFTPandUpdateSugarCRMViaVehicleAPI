@@ -62,8 +62,12 @@ class AppConfig:
 
     @classmethod
     def from_env(cls) -> "AppConfig":
-        allowed = os.getenv("ALLOWED_MAKES", "HYUNDAI,ISUZU,RENAULT")
-        allowed_makes = [item.strip().upper() for item in allowed.split(",") if item.strip()]
+        allowed = os.getenv("ALLOWED_MAKES", "HYUNDAI|ISUZU|RENAULT")
+        allowed_makes = [
+            item.strip().upper()
+            for item in allowed.replace(",", "|").split("|")
+            if item.strip()
+        ]
         recipients_raw = os.getenv("EMAIL_RECIPIENTS", "ssaleem@ib4t.co")
         email_recipients = [
             item.strip()
