@@ -94,7 +94,7 @@ steps:
       ]
 
   # 6) Recreate the push subscription pointing to the fresh service URL.
-  - name: gcr.io.google.com/cloudsdktool/cloud-sdk
+  - name: gcr.io/google.com/cloudsdktool/cloud-sdk
     entrypoint: bash
     args:
       - -c
@@ -110,7 +110,7 @@ steps:
           --push-auth-service-account="ib4t-integration@adh-data-utopia.iam.gserviceaccount.com"
 
   # 7) Create or update the Scheduler job that publishes weekly triggers.
-  - name: gcr.io.google.com/cloudsdktool/cloud-sdk
+  - name: gcr.io/google.com/cloudsdktool/cloud-sdk
     entrypoint: bash
     args:
       - -c
