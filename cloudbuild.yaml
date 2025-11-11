@@ -2,7 +2,7 @@ substitutions:
   # Region where Cloud Run, Scheduler, and Artifact Registry operate.
   _REGION: australia-southeast1
   # Cloud Run service hosting the ingestion pipeline.
-  _SERVICE: all_brands_nzta_deregistered_vins_sync
+  _SERVICE: all-brands-nzta-deregistered-vins-sync
   # Artifact Registry repository used for versioned images.
   _REPO: all-brands-nzta-deregistered-vins
 
@@ -45,8 +45,8 @@ steps:
       - -c
       - |
         set -euo pipefail
-        gcloud pubsub topics describe all_brands_nzta_deregistered_vins_sync_trigger >/dev/null 2>&1 || \
-        gcloud pubsub topics create all_brands_nzta_deregistered_vins_sync_trigger
+        gcloud pubsub topics describe all-brands-nzta-deregistered-vins-sync-trigger >/dev/null 2>&1 || \
+        gcloud pubsub topics create all-brands-nzta-deregistered-vins-sync-trigger
 
   # 2) Build the Cloud Run container image from the current workspace.
   - name: gcr.io/cloud-builders/docker
@@ -101,11 +101,11 @@ steps:
       - |
         set -euo pipefail
         SERVICE_URL="$(gcloud run services describe $_SERVICE --region $_REGION --format='value(status.url)')"
-        if gcloud pubsub subscriptions describe all_brands_nzta_deregistered_vins_runner >/dev/null 2>&1; then
-          gcloud pubsub subscriptions delete all_brands_nzta_deregistered_vins_runner --quiet
+        if gcloud pubsub subscriptions describe all-brands-nzta-deregistered-vins-runner >/dev/null 2>&1; then
+          gcloud pubsub subscriptions delete all-brands-nzta-deregistered-vins-runner --quiet
         fi
-        gcloud pubsub subscriptions create all_brands_nzta_deregistered_vins_runner \
-          --topic=all_brands_nzta_deregistered_vins_sync_trigger \
+        gcloud pubsub subscriptions create all-brands-nzta-deregistered-vins-runner \
+          --topic=all-brands-nzta-deregistered-vins-sync-trigger \
           --push-endpoint="$${SERVICE_URL}/" \
           --push-auth-service-account="ib4t-integration@adh-data-utopia.iam.gserviceaccount.com"
 
@@ -116,20 +116,20 @@ steps:
       - -c
       - |
         set -euo pipefail
-        JOB_NAME="all_brands_nzta_deregistered_vins_weekly"
+        JOB_NAME="all-brands-nzta-deregistered-vins-weekly"
         SCHEDULE="0 3 * * 2"  # Tuesdays at 03:00 NZT.
         TZ="Pacific/Auckland"
         if gcloud scheduler jobs describe $${JOB_NAME} >/dev/null 2>&1; then
           gcloud scheduler jobs update pubsub $${JOB_NAME} \
             --schedule="$${SCHEDULE}" \
             --time-zone="$${TZ}" \
-            --topic=all_brands_nzta_deregistered_vins_sync_trigger \
+            --topic=all-brands-nzta-deregistered-vins-sync-trigger \
             --message-body="{}"
         else
           gcloud scheduler jobs create pubsub $${JOB_NAME} \
             --schedule="$${SCHEDULE}" \
             --time-zone="$${TZ}" \
-            --topic=all_brands_nzta_deregistered_vins_sync_trigger \
+            --topic=all-brands-nzta-deregistered-vins-sync-trigger \
             --message-body="{}"
         fi
 

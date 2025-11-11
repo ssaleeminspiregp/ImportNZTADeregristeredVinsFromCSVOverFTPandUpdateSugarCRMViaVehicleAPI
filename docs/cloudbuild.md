@@ -5,7 +5,7 @@ This document explains every section of `cloudbuild.yaml` so future developers u
 ### Substitutions
 
 - `_REGION`: Single place to switch the GCP region for Cloud Run, Artifact Registry, and Scheduler.
-- `_SERVICE`: Cloud Run service name (`all_brands_nzta_deregistered_vins_sync`).
+- `_SERVICE`: Cloud Run service name (`all-brands-nzta-deregistered-vins-sync`).
 - `_REPO`: Artifact Registry repository (`all-brands-nzta-deregistered-vins`) that stores tagged images.
 
 ### Step Breakdown
