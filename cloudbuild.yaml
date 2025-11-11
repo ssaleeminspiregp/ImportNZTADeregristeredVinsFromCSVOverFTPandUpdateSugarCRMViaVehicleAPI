@@ -4,7 +4,7 @@ substitutions:
   # Cloud Run service hosting the ingestion pipeline.
   _SERVICE: all_brands_nzta_deregistered_vins_sync
   # Artifact Registry repository used for versioned images.
-  _REPO: all_brands_nzta_deregistered_vins
+  _REPO: all-brands-nzta-deregistered-vins
 
 logsBucket: gs://ib4t-integration-adh-data-utopia-cloudbuild-logs
 
