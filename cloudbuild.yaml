@@ -103,14 +103,14 @@ steps:
         JOB_NAME="all_brands_nzta_deregistered_vins_weekly"
         SCHEDULE="0 3 * * 2"  # Tuesdays at 03:00 NZT.
         TZ="Pacific/Auckland"
-        if gcloud scheduler jobs describe ${JOB_NAME} >/dev/null 2>&1; then
-          gcloud scheduler jobs update pubsub ${JOB_NAME} \
+        if gcloud scheduler jobs describe $${JOB_NAME} >/dev/null 2>&1; then
+          gcloud scheduler jobs update pubsub $${JOB_NAME} \
             --schedule="${SCHEDULE}" \
             --time-zone="${TZ}" \
             --topic=all_brands_nzta_deregistered_vins_sync_trigger \
             --message-body="{}"
         else
-          gcloud scheduler jobs create pubsub ${JOB_NAME} \
+          gcloud scheduler jobs create pubsub $${JOB_NAME} \
             --schedule="${SCHEDULE}" \
             --time-zone="${TZ}" \
             --topic=all_brands_nzta_deregistered_vins_sync_trigger \
