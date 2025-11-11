@@ -10,31 +10,34 @@ This document explains every section of `cloudbuild.yaml` so future developers u
 
 ### Step Breakdown
 
-1. **Ensure Artifact Registry repo exists**  
+1. **Enable required APIs**  
+   Runs `gcloud services enable appengine.googleapis.com cloudscheduler.googleapis.com` so Cloud Scheduler can be provisioned.
+
+2. **Ensure Artifact Registry repo exists**  
    Runs `gcloud artifacts repositories describe/create` so the Docker push always has a destination (`_REPO` in `_REGION`). Needs `roles/artifactregistry.admin` or equivalent create permissions.
 
-2. **Ensure GCS bucket exists**  
+3. **Ensure GCS bucket exists**  
    Runs `gsutil ls` and, if needed, `gsutil mb` so the landing bucket (`all_brands_nzta_deregistered_vins_temp_DO_NOT_DELETE`) always exists. Needs `roles/storage.admin`.
 
-3. **Ensure Pub/Sub topic exists**  
+4. **Ensure Pub/Sub topic exists**  
    Uses `gcloud pubsub topics describe` with a fallback `create` so later steps (subscription + Scheduler) always have the topic available. Needs `roles/pubsub.admin`.
 
-4. **Docker build**  
+5. **Docker build**  
    Runs `docker build` to package the Python app (no extra IAM beyond Cloud Build default).
 
-5. **Docker push**  
+6. **Docker push**  
    Pushes the image to Artifact Registry (`roles/artifactregistry.writer`).
 
-6. **Cloud Run deploy**  
+7. **Cloud Run deploy**  
    `gcloud run deploy` publishes the image and wires environment variables to secret names, datasets, buckets, and optional SMTP fields. Requires `roles/run.admin` plus `roles/iam.serviceAccountUser` on the runtime SA so Cloud Build can deploy on its behalf.
 
-7. **Grant Pub/Sub invoker**  
+8. **Grant Pub/Sub invoker**  
    `gcloud run services add-iam-policy-binding` gives `ib4t-integration@adh-data-utopia.iam.gserviceaccount.com` `roles/run.invoker`, which Pub/Sub uses when pushing events.
 
-8. **Recreate Pub/Sub subscription**  
+9. **Recreate Pub/Sub subscription**  
    Fetches the newly deployed service URL and creates (or replaces) the push subscription `all_brands_nzta_deregistered_vins_runner` that targets it. Ensures we always point at the latest HTTPS endpoint when revisions change. Requires `roles/pubsub.admin`.
 
-9. **Create/Update Scheduler job**  
+10. **Create/Update Scheduler job**  
    Makes sure there is a Cloud Scheduler job (`all_brands_nzta_deregistered_vins_weekly`) that publishes to the trigger topic every Tuesday at 03:00 `Pacific/Auckland`. Uses `gcloud scheduler jobs create/update`, so `roles/cloudscheduler.admin` is required.
 
 ### Images Section

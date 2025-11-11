@@ -12,7 +12,16 @@ options:
   logging: GCS_ONLY
 
 steps:
-  # 0) Ensure Artifact Registry repository exists.
+  # 0) Enable required APIs (idempotent if already enabled).
+  - name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        set -euo pipefail
+        gcloud services enable appengine.googleapis.com cloudscheduler.googleapis.com
+
+  # 1) Ensure Artifact Registry repository exists.
   - name: gcr.io/google.com/cloudsdktool/cloud-sdk
     entrypoint: bash
     args:
@@ -119,14 +128,16 @@ steps:
         JOB_NAME="all-brands-nzta-deregistered-vins-weekly"
         SCHEDULE="0 3 * * 2"  # Tuesdays at 03:00 NZT.
         TZ="Pacific/Auckland"
-        if gcloud scheduler jobs describe $${JOB_NAME} >/dev/null 2>&1; then
+        if gcloud scheduler jobs describe $${JOB_NAME} --location="$_REGION" >/dev/null 2>&1; then
           gcloud scheduler jobs update pubsub $${JOB_NAME} \
+            --location="$_REGION" \
             --schedule="$${SCHEDULE}" \
             --time-zone="$${TZ}" \
             --topic=all-brands-nzta-deregistered-vins-sync-trigger \
             --message-body="{}"
         else
           gcloud scheduler jobs create pubsub $${JOB_NAME} \
+            --location="$_REGION" \
             --schedule="$${SCHEDULE}" \
             --time-zone="$${TZ}" \
             --topic=all-brands-nzta-deregistered-vins-sync-trigger \
