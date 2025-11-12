@@ -3,6 +3,8 @@ import os
 from functools import lru_cache
 from typing import Any, Dict
 
+from google.auth import default as google_auth_default
+
 from google.cloud import secretmanager
 
 
@@ -25,6 +27,9 @@ def _build_resource_name(secret_name: str, version: str) -> str:
         or os.getenv("GCP_PROJECT")
         or os.getenv("PROJECT_ID")
     )
+    if not project_id:
+        credentials, inferred_project = google_auth_default(scopes=["https://www.googleapis.com/auth/cloud-platform"])
+        project_id = inferred_project
     if not project_id:
         raise RuntimeError(
             "Missing project ID; set GOOGLE_CLOUD_PROJECT when referencing short secret names."
