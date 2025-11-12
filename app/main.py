@@ -70,7 +70,7 @@ def execute_pipeline(trigger_payload: Dict[str, Any]) -> Dict[str, Any]:
         )
         sugar.authenticate()
 
-        for filename, local_path in ftp.iter_downloads(
+        for filename, remote_file, local_path in ftp.iter_downloads(
             remote_path=config.ftp_remote_path,
             destination_dir=temp_dir,
             pattern=config.ftp_file_pattern,
@@ -98,6 +98,12 @@ def execute_pipeline(trigger_payload: Dict[str, Any]) -> Dict[str, Any]:
                         "error": str(exc),
                     }
                 )
+            finally:
+                try:
+                    ftp.delete_file(remote_file)
+                    logging.info("Deleted FTP file %s after processing", remote_file)
+                except Exception:  # noqa: BLE001
+                    logging.exception("Failed to delete FTP file %s", remote_file)
     finally:
         for path in temp_dir.glob("*"):
             path.unlink(missing_ok=True)

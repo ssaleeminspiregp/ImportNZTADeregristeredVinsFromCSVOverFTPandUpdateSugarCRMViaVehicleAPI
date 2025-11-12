@@ -51,12 +51,21 @@ class FtpDownloader:
 
     def iter_downloads(
         self, remote_path: str, destination_dir: Path, pattern: str = "*.csv"
-    ) -> Iterator[Tuple[str, Path]]:
+    ) -> Iterator[Tuple[str, str, Path]]:
         remote_dir = remote_path.strip("/")
         filenames = self.list_matching(remote_dir, pattern)
         for filename in filenames:
             destination = destination_dir / filename
-            yield filename, self.download_file(remote_dir, filename, destination)
+            remote_file = f"{remote_dir}/{filename}" if remote_dir else filename
+            yield filename, remote_file, self.download_file(remote_dir, filename, destination)
+
+    def delete_file(self, remote_path: str) -> None:
+        remote_dir, filename = self._split_path(remote_path)
+        with closing(ftplib.FTP()) as ftp:
+            self._login(ftp)
+            if remote_dir:
+                ftp.cwd(remote_dir)
+            ftp.delete(filename)
 
     def _login(self, ftp: ftplib.FTP) -> None:
         ftp.connect(self.host, self.port, timeout=self.timeout)
