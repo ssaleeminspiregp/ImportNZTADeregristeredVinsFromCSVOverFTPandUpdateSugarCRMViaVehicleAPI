@@ -78,6 +78,8 @@ def execute_pipeline(trigger_payload: Dict[str, Any]) -> Dict[str, Any]:
             logging.info("Processing FTP file %s", filename)
             try:
                 report = _process_single_file(
+                    filename=filename,
+                    remote_file=remote_file,
                     local_path=local_path,
                     storage_writer=storage_writer,
                     stage_repo=stage_repo,
@@ -85,9 +87,8 @@ def execute_pipeline(trigger_payload: Dict[str, Any]) -> Dict[str, Any]:
                     notifier=notifier,
                     trigger_payload=trigger_payload,
                     sugar=sugar,
+                    ftp=ftp,
                 )
-                report["source_filename"] = filename
-                report["status"] = "success"
                 processed_reports.append(report)
             except Exception as exc:  # noqa: BLE001
                 logging.exception("Failed to process file %s", filename)
@@ -98,12 +99,6 @@ def execute_pipeline(trigger_payload: Dict[str, Any]) -> Dict[str, Any]:
                         "error": str(exc),
                     }
                 )
-            finally:
-                try:
-                    ftp.delete_file(remote_file)
-                    logging.info("Deleted FTP file %s after processing", remote_file)
-                except Exception:  # noqa: BLE001
-                    logging.exception("Failed to delete FTP file %s", remote_file)
     finally:
         for path in temp_dir.glob("*"):
             path.unlink(missing_ok=True)
@@ -129,6 +124,8 @@ def _decode_pubsub(body: Dict[str, Any] | None) -> Dict[str, Any]:
 
 
 def _process_single_file(
+    filename: str,
+    remote_file: str,
     local_path: Path,
     storage_writer: StorageWriter,
     stage_repo: StageRepository,
@@ -136,10 +133,11 @@ def _process_single_file(
     notifier: EmailNotifier | None,
     trigger_payload: Dict[str, Any],
     sugar: SugarCrmClient,
+    ftp: FtpDownloader,
 ) -> Dict[str, Any]:
     uploaded_file = storage_writer.upload_raw(local_path)
     original_uri = uploaded_file.uri
-    staged_entries = []
+    current_file = uploaded_file
     staged = False
     try:
         processor = CsvProcessor(config.allowed_makes)
@@ -149,13 +147,18 @@ def _process_single_file(
             _handle_header_error(notifier, local_path, exc)
             raise
 
-        logging.info("Loaded %s eligible VIN records from %s", len(records), local_path.name)
-        staged_entries = stage_repo.stage_records(records, original_uri)
-        staged = bool(staged_entries)
+        logging.info("Loaded %s eligible VIN records from %s", len(records), filename)
+        stage_repo.stage_records(records, original_uri)
+        staged = bool(records)
 
+        processed_file = storage_writer.move_to_processed(uploaded_file)
+        current_file = processed_file
+        stage_repo.update_gcs_uri(original_uri, processed_file.uri)
+
+        entries = stage_repo.fetch_pending_by_gcs(processed_file.uri)
         successes = 0
         failures: List[Dict[str, str]] = []
-        for entry in staged_entries:
+        for entry in entries:
             record = entry.record
             try:
                 vehicle_id = sugar.find_vehicle_id(record.vin)
@@ -173,7 +176,8 @@ def _process_single_file(
                 failures.append({"vin": record.vin, "error": str(exc)})
 
         summary = {
-            "gcs_uri": original_uri,
+            "source_filename": filename,
+            "gcs_uri": processed_file.uri,
             "processed_records": len(records),
             "successful_updates": successes,
             "failed_updates": len(failures),
@@ -181,17 +185,22 @@ def _process_single_file(
             "trigger_payload": trigger_payload,
         }
 
-        processed_file = storage_writer.move_to_processed(uploaded_file)
-        summary["gcs_uri"] = processed_file.uri
-        if staged:
-            stage_repo.update_gcs_uri(original_uri, processed_file.uri)
+        _notify_processing_summary(notifier, filename, summary, failures)
+
+        summary["status"] = "success"
         return summary
     except Exception:
-        if uploaded_file:
-            error_file = storage_writer.move_to_error(uploaded_file)
+        if current_file:
+            error_file = storage_writer.move_to_error(current_file)
             if staged:
                 stage_repo.update_gcs_uri(original_uri, error_file.uri)
         raise
+    finally:
+        try:
+            ftp.delete_file(remote_file)
+            logging.info("Deleted FTP file %s after processing", remote_file)
+        except Exception:  # noqa: BLE001
+            logging.exception("Failed to delete FTP file %s", remote_file)
 
 
 def _handle_header_error(
@@ -214,3 +223,33 @@ def _handle_header_error(
         )
     except Exception:  # noqa: BLE001
         logging.exception("Failed to send header validation alert email")
+
+
+def _notify_processing_summary(
+    notifier: EmailNotifier | None,
+    filename: str,
+    summary: Dict[str, Any],
+    failures: List[Dict[str, str]],
+) -> None:
+    if not notifier or not failures:
+        return
+    lines = [
+        "NZTA deregistered VIN sync completed with failures.",
+        f"File: {filename}",
+        f"GCS URI: {summary.get('gcs_uri')}",
+        f"Processed records: {summary.get('processed_records')}",
+        f"Successful updates: {summary.get('successful_updates')}",
+        f"Failed updates: {summary.get('failed_updates')}",
+        "",
+        "Failed VINs:",
+    ]
+    for item in failures:
+        lines.append(f"- {item.get('vin')}: {item.get('error')}")
+    body = "\n".join(lines)
+    try:
+        notifier.send(
+            subject=f"NZTA VIN sync failures for {filename}",
+            body=body,
+        )
+    except Exception:  # noqa: BLE001
+        logging.exception("Failed to send processing summary email")

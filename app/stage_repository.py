@@ -108,6 +108,32 @@ class StageRepository:
     def record_error(self, stage_id: str, error_message: str) -> None:
         self._update_status(stage_id, "pending", error_message)
 
+    def fetch_pending_by_gcs(self, gcs_uri: str) -> list[StagedEntry]:
+        query = f"""
+        SELECT id, vin, vehicle_make, vehicle_model, dereg_date, reg_plate
+        FROM `{self._table_id}`
+        WHERE status = 'pending' AND gcs_uri = @gcs_uri
+        """
+        job = self.client.query(
+            query,
+            job_config=bigquery.QueryJobConfig(
+                query_parameters=[
+                    bigquery.ScalarQueryParameter("gcs_uri", "STRING", gcs_uri),
+                ]
+            ),
+        )
+        records: list[StagedEntry] = []
+        for row in job.result():
+            vehicle = VehicleRecord(
+                make=row["vehicle_make"] or "",
+                model=row["vehicle_model"] or "",
+                vin=row["vin"] or "",
+                dereg_date=row["dereg_date"] or "",
+                rego=row["reg_plate"] or "",
+            )
+            records.append(StagedEntry(stage_id=row["id"], record=vehicle))
+        return records
+
     def update_gcs_uri(self, old_uri: str, new_uri: str) -> None:
         query = f"""
         UPDATE `{self._table_id}`
