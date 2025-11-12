@@ -127,9 +127,9 @@ class AppConfig:
             sugar_client_secret=sugar_client_secret,
             sugar_platform=sugar_platform,
             sugar_grant_type=sugar_grant_type,
-            bq_dataset=os.getenv("BQ_STAGE_DATASET", "ds_nzta_deregistered_vins"),
+            bq_dataset=os.getenv("BQ_STAGE_DATASET", "ds_nzta"),
             bq_table=os.getenv(
-                "BQ_STAGE_TABLE", "dl_all_brands_nzta_deregistered_vins_stage"
+                "BQ_STAGE_TABLE", "dl_all_brands_deregistered_vins_stage"
             ),
             bq_location=os.getenv("BQ_STAGE_LOCATION", "australia-southeast1"),
             email=email_settings,
