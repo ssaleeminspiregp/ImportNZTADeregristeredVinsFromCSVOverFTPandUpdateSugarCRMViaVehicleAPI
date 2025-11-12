@@ -14,7 +14,7 @@ def _require_env(key: str) -> str:
 
 def _require_field(source: Dict[str, Any], key: str, context: str) -> str:
     value = source.get(key)
-    if not value:
+    if value is None:
         raise RuntimeError(f"Missing '{key}' in {context}")
     return value
 
