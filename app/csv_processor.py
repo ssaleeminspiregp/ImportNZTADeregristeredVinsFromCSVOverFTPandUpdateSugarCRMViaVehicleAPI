@@ -6,7 +6,6 @@ from pathlib import Path
 from typing import Iterable, Iterator
 
 
-@dataclass
 EXPECTED_HEADERS = [
     "VEHICLE_MAKE",
     "VEHICLE_MODEL",
@@ -26,6 +25,7 @@ class HeaderValidationError(Exception):
         super().__init__(message)
 
 
+@dataclass
 class VehicleRecord:
     make: str
     model: str
