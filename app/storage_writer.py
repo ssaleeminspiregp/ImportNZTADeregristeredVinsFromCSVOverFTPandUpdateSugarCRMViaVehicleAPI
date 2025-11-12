@@ -3,6 +3,7 @@ import logging
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
+from zoneinfo import ZoneInfo
 
 from google.cloud import storage
 
@@ -64,7 +65,8 @@ class StorageWriter:
         )
 
     def _build_blob_name(self, prefix: str, filename: str) -> str:
-        timestamp = datetime.datetime.utcnow().strftime("%Y/%m/%d/%H%M%S")
+        nz_time = datetime.datetime.now(ZoneInfo("Pacific/Auckland"))
+        timestamp = nz_time.strftime("%Y-%m-%d-%H-%M-%S")
         cleaned_prefix = prefix.strip("/")
         core_name = f"{timestamp}-{filename}"
         return f"{cleaned_prefix}/{core_name}" if cleaned_prefix else core_name

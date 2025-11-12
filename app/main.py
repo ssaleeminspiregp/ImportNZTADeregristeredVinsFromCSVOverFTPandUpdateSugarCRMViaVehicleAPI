@@ -157,7 +157,7 @@ def _process_single_file(
         if stage_repo.update_gcs_uri(staged_uri, processed_file.uri):
             staged_uri = processed_file.uri
 
-        entries = stage_repo.fetch_pending_by_gcs(processed_file.uri)
+        entries = stage_repo.fetch_by_status()
         successes = 0
         failures: List[Dict[str, str]] = []
         for entry in entries:

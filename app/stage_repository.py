@@ -130,17 +130,17 @@ class StageRepository:
             ],
         )
 
-    def fetch_pending_by_gcs(self, gcs_uri: str) -> list[StagedEntry]:
+    def fetch_by_status(self, status: str = "pending") -> list[StagedEntry]:
         query = f"""
         SELECT id, vin, vehicle_make, vehicle_model, dereg_date, reg_plate
         FROM `{self._table_id}`
-        WHERE status = 'pending' AND gcs_uri = @gcs_uri
+        WHERE status = @status
         """
         job = self.client.query(
             query,
             job_config=bigquery.QueryJobConfig(
                 query_parameters=[
-                    bigquery.ScalarQueryParameter("gcs_uri", "STRING", gcs_uri),
+                    bigquery.ScalarQueryParameter("status", "STRING", status),
                 ]
             ),
         )
