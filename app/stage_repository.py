@@ -106,7 +106,31 @@ class StageRepository:
         self._update_status(stage_id, "pushed", None)
 
     def record_error(self, stage_id: str, error_message: str) -> None:
-        self._update_status(stage_id, "pending", error_message)
+        self._update_status(stage_id, "failed", error_message)
+
+    def mark_failed_by_gcs(self, gcs_uri: str, error_message: str) -> None:
+        """Mark every pending row tied to a GCS object as failed."""
+        query = f"""
+        UPDATE `{self._table_id}`
+        SET status = 'failed',
+            error_message = @error,
+            date_modified = @modified
+        WHERE gcs_uri = @gcs_uri AND status = 'pending'
+        """
+        self.client.query(
+            query,
+            job_config=bigquery.QueryJobConfig(
+                query_parameters=[
+                    bigquery.ScalarQueryParameter("error", "STRING", error_message),
+                    bigquery.ScalarQueryParameter(
+                        "modified",
+                        "TIMESTAMP",
+                        datetime.now(timezone.utc).isoformat(),
+                    ),
+                    bigquery.ScalarQueryParameter("gcs_uri", "STRING", gcs_uri),
+                ]
+            ),
+        ).result()
 
     def fetch_pending_by_gcs(self, gcs_uri: str) -> list[StagedEntry]:
         query = f"""
