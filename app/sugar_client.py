@@ -53,12 +53,7 @@ class SugarCrmClient:
             "filter[0][vin_c][$equals]": vin,
             "max_num": 1,
         }
-        response = self.session.get(
-            url,
-            headers=self._auth_headers(),
-            params=params,
-            timeout=self.timeout,
-        )
+        response = self._request("get", url, params=params)
         response.raise_for_status()
         payload = response.json()
         records = payload.get("records") or []
@@ -74,15 +69,26 @@ class SugarCrmClient:
             "vehicle_status_c": "Deregistered",
             "latest_dereg_date_c": record.dereg_date,
         }
-        response = self.session.put(
-            url,
-            params=payload,
-            headers=self._auth_headers(),
-            timeout=self.timeout,
-        )
+        response = self._request("put", url, params=payload)
         response.raise_for_status()
 
     def _auth_headers(self) -> dict[str, str]:
         if not self._access_token:
             raise RuntimeError("SugarCRM client not authenticated")
         return {"Authorization": f"Bearer {self._access_token}"}
+
+    def _request(self, method: str, url: str, **kwargs) -> requests.Response:
+        if "timeout" not in kwargs:
+            kwargs["timeout"] = self.timeout
+        headers = kwargs.pop("headers", {})
+        headers.update(self._auth_headers())
+        kwargs["headers"] = headers
+
+        response = self.session.request(method=method, url=url, **kwargs)
+        if response.status_code == 401:
+            logging.warning("SugarCRM request unauthorized; refreshing token and retrying")
+            self.authenticate()
+            headers.update(self._auth_headers())
+            kwargs["headers"] = headers
+            response = self.session.request(method=method, url=url, **kwargs)
+        return response
