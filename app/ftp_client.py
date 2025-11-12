@@ -71,3 +71,14 @@ class FtpDownloader:
         ftp.connect(self.host, self.port, timeout=self.timeout)
         ftp.login(self.username, self.password)
         ftp.set_pasv(True)
+
+    def _split_path(self, remote_path: str) -> Tuple[str, str]:
+        """Split a remote path into directory and filename components."""
+        normalized = remote_path.strip("/")
+        if not normalized:
+            return "", ""
+        if "/" in normalized:
+            directory, filename = normalized.rsplit("/", 1)
+        else:
+            directory, filename = "", normalized
+        return directory, filename

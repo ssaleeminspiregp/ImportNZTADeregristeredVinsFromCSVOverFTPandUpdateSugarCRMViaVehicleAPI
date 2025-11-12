@@ -154,8 +154,8 @@ def _process_single_file(
 
         processed_file = storage_writer.move_to_processed(uploaded_file)
         current_file = processed_file
-        stage_repo.update_gcs_uri(staged_uri, processed_file.uri)
-        staged_uri = processed_file.uri
+        if stage_repo.update_gcs_uri(staged_uri, processed_file.uri):
+            staged_uri = processed_file.uri
 
         entries = stage_repo.fetch_pending_by_gcs(processed_file.uri)
         successes = 0
@@ -195,8 +195,7 @@ def _process_single_file(
         failure_message = f"Failed to process {filename}: {exc}"
         if current_file:
             error_file = storage_writer.move_to_error(current_file)
-            if staged:
-                stage_repo.update_gcs_uri(staged_uri, error_file.uri)
+            if staged and stage_repo.update_gcs_uri(staged_uri, error_file.uri):
                 staged_uri = error_file.uri
             current_file = error_file
         if staged:

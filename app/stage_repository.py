@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Iterable, List, Optional
 
-from google.api_core.exceptions import NotFound
+from google.api_core.exceptions import BadRequest, NotFound
 from google.cloud import bigquery
 
 from app.csv_processor import VehicleRecord
@@ -108,7 +108,7 @@ class StageRepository:
     def record_error(self, stage_id: str, error_message: str) -> None:
         self._update_status(stage_id, "failed", error_message)
 
-    def mark_failed_by_gcs(self, gcs_uri: str, error_message: str) -> None:
+    def mark_failed_by_gcs(self, gcs_uri: str, error_message: str) -> bool:
         """Mark every pending row tied to a GCS object as failed."""
         query = f"""
         UPDATE `{self._table_id}`
@@ -117,20 +117,18 @@ class StageRepository:
             date_modified = @modified
         WHERE gcs_uri = @gcs_uri AND status = 'pending'
         """
-        self.client.query(
+        return self._run_update_query(
             query,
-            job_config=bigquery.QueryJobConfig(
-                query_parameters=[
-                    bigquery.ScalarQueryParameter("error", "STRING", error_message),
-                    bigquery.ScalarQueryParameter(
-                        "modified",
-                        "TIMESTAMP",
-                        datetime.now(timezone.utc).isoformat(),
-                    ),
-                    bigquery.ScalarQueryParameter("gcs_uri", "STRING", gcs_uri),
-                ]
-            ),
-        ).result()
+            [
+                bigquery.ScalarQueryParameter("error", "STRING", error_message),
+                bigquery.ScalarQueryParameter(
+                    "modified",
+                    "TIMESTAMP",
+                    datetime.now(timezone.utc).isoformat(),
+                ),
+                bigquery.ScalarQueryParameter("gcs_uri", "STRING", gcs_uri),
+            ],
+        )
 
     def fetch_pending_by_gcs(self, gcs_uri: str) -> list[StagedEntry]:
         query = f"""
@@ -158,21 +156,19 @@ class StageRepository:
             records.append(StagedEntry(stage_id=row["id"], record=vehicle))
         return records
 
-    def update_gcs_uri(self, old_uri: str, new_uri: str) -> None:
+    def update_gcs_uri(self, old_uri: str, new_uri: str) -> bool:
         query = f"""
         UPDATE `{self._table_id}`
         SET gcs_uri = @new_uri
         WHERE gcs_uri = @old_uri
         """
-        self.client.query(
+        return self._run_update_query(
             query,
-            job_config=bigquery.QueryJobConfig(
-                query_parameters=[
-                    bigquery.ScalarQueryParameter("new_uri", "STRING", new_uri),
-                    bigquery.ScalarQueryParameter("old_uri", "STRING", old_uri),
-                ]
-            ),
-        ).result()
+            [
+                bigquery.ScalarQueryParameter("new_uri", "STRING", new_uri),
+                bigquery.ScalarQueryParameter("old_uri", "STRING", old_uri),
+            ],
+        )
 
     def _update_status(
         self, stage_id: str, status: str, error_message: Optional[str]
@@ -184,18 +180,36 @@ class StageRepository:
             date_modified = @modified
         WHERE id = @id
         """
-        self.client.query(
+        self._run_update_query(
             query,
-            job_config=bigquery.QueryJobConfig(
-                query_parameters=[
-                    bigquery.ScalarQueryParameter("status", "STRING", status),
-                    bigquery.ScalarQueryParameter("error", "STRING", error_message),
-                    bigquery.ScalarQueryParameter(
-                        "modified",
-                        "TIMESTAMP",
-                        datetime.now(timezone.utc).isoformat(),
-                    ),
-                    bigquery.ScalarQueryParameter("id", "STRING", stage_id),
-                ]
-            ),
-        ).result()
+            [
+                bigquery.ScalarQueryParameter("status", "STRING", status),
+                bigquery.ScalarQueryParameter("error", "STRING", error_message),
+                bigquery.ScalarQueryParameter(
+                    "modified",
+                    "TIMESTAMP",
+                    datetime.now(timezone.utc).isoformat(),
+                ),
+                bigquery.ScalarQueryParameter("id", "STRING", stage_id),
+            ],
+        )
+
+    def _run_update_query(
+        self, query: str, parameters: List[bigquery.ScalarQueryParameter]
+    ) -> bool:
+        """Execute a BigQuery mutation, tolerating streaming-buffer limitations."""
+        try:
+            self.client.query(
+                query,
+                job_config=bigquery.QueryJobConfig(query_parameters=parameters),
+            ).result()
+            return True
+        except BadRequest as exc:
+            message = getattr(exc, "message", str(exc))
+            if message and "streaming buffer" in message.lower():
+                logging.warning(
+                    "Deferring BigQuery mutation; rows still in streaming buffer: %s",
+                    message,
+                )
+                return False
+            raise
