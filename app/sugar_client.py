@@ -1,5 +1,6 @@
 import json
 import logging
+from datetime import date, datetime
 from typing import Optional
 from urllib.parse import urljoin
 
@@ -73,7 +74,7 @@ class SugarCrmClient:
         url = urljoin(self.base_url, f"rest/v11_20/VHE_Vehicle/{vehicle_id}")
         payload = {
             "vehicle_status_c": "Deregistered",
-            "latest_dereg_date_c": record.dereg_date,
+            "latest_dereg_date_c": self._format_date(record.dereg_date),
         }
         response = self._request("put", url, json=payload)
         logging.debug(
@@ -151,3 +152,11 @@ class SugarCrmClient:
 
     def _truncate(self, text: str, length: int = 500) -> str:
         return text if len(text) <= length else f"{text[:length]}…"
+
+    @staticmethod
+    def _format_date(value: Optional[str | date | datetime]) -> Optional[str]:
+        if value is None or value == "":
+            return None
+        if isinstance(value, (date, datetime)):
+            return value.isoformat()
+        return str(value)

@@ -70,11 +70,13 @@ def execute_pipeline(trigger_payload: Dict[str, Any]) -> Dict[str, Any]:
         )
         sugar.authenticate()
 
+        found_file = False
         for filename, remote_file, local_path in ftp.iter_downloads(
             remote_path=config.ftp_remote_path,
             destination_dir=temp_dir,
             pattern=config.ftp_file_pattern,
         ):
+            found_file = True
             logging.info("Processing FTP file %s", filename)
             try:
                 report = _process_single_file(
@@ -99,6 +101,8 @@ def execute_pipeline(trigger_payload: Dict[str, Any]) -> Dict[str, Any]:
                         "error": str(exc),
                     }
                 )
+        if not found_file and notifier:
+            _notify_no_files(notifier)
     finally:
         for path in temp_dir.glob("*"):
             path.unlink(missing_ok=True)
@@ -136,10 +140,19 @@ def _process_single_file(
     ftp: FtpDownloader,
 ) -> Dict[str, Any]:
     uploaded_file = storage_writer.upload_raw(local_path)
-    original_uri = uploaded_file.uri
+    source_filename = uploaded_file.blob_name.split("/")[-1]
     current_file = uploaded_file
     staged = False
-    staged_uri = original_uri
+    ftp_deleted = False
+    try:
+        ftp.delete_file(remote_file)
+        ftp_deleted = True
+        logging.info("Deleted FTP file %s immediately after upload", remote_file)
+    except Exception:  # noqa: BLE001
+        logging.exception(
+            "Failed to delete FTP file %s immediately after upload; will retry later",
+            remote_file,
+        )
     try:
         processor = CsvProcessor(config.allowed_makes)
         try:
@@ -149,13 +162,11 @@ def _process_single_file(
             raise
 
         logging.info("Loaded %s eligible VIN records from %s", len(records), filename)
-        staged_entries = stage_repo.stage_records(records, original_uri)
+        staged_entries = stage_repo.stage_records(records, source_filename)
         staged = bool(staged_entries)
 
         processed_file = storage_writer.move_to_processed(uploaded_file)
         current_file = processed_file
-        if stage_repo.update_gcs_uri(staged_uri, processed_file.uri):
-            staged_uri = processed_file.uri
 
         entries = stage_repo.fetch_by_status()
         successes = 0
@@ -179,7 +190,7 @@ def _process_single_file(
 
         summary = {
             "source_filename": filename,
-            "gcs_uri": processed_file.uri,
+            "file_name": source_filename,
             "processed_records": len(records),
             "successful_updates": successes,
             "failed_updates": len(failures),
@@ -195,18 +206,17 @@ def _process_single_file(
         failure_message = f"Failed to process {filename}: {exc}"
         if current_file:
             error_file = storage_writer.move_to_error(current_file)
-            if staged and stage_repo.update_gcs_uri(staged_uri, error_file.uri):
-                staged_uri = error_file.uri
             current_file = error_file
         if staged:
-            stage_repo.mark_failed_by_gcs(staged_uri, failure_message)
+            stage_repo.mark_failed_by_file(source_filename, failure_message)
         raise
     finally:
-        try:
-            ftp.delete_file(remote_file)
-            logging.info("Deleted FTP file %s after processing", remote_file)
-        except Exception:  # noqa: BLE001
-            logging.exception("Failed to delete FTP file %s", remote_file)
+        if not ftp_deleted:
+            try:
+                ftp.delete_file(remote_file)
+                logging.info("Deleted FTP file %s after processing", remote_file)
+            except Exception:  # noqa: BLE001
+                logging.exception("Failed to delete FTP file %s after processing", remote_file)
 
 
 def _handle_header_error(
@@ -237,25 +247,50 @@ def _notify_processing_summary(
     summary: Dict[str, Any],
     failures: List[Dict[str, str]],
 ) -> None:
-    if not notifier or not failures:
+    if not notifier:
         return
+    has_failures = bool(failures)
     lines = [
-        "NZTA deregistered VIN sync completed with failures.",
+        (
+            "NZTA deregistered VIN sync completed with failures."
+            if has_failures
+            else "NZTA deregistered VIN sync completed successfully."
+        ),
         f"File: {filename}",
-        f"GCS URI: {summary.get('gcs_uri')}",
+        f"File name: {summary.get('file_name')}",
         f"Processed records: {summary.get('processed_records')}",
         f"Successful updates: {summary.get('successful_updates')}",
         f"Failed updates: {summary.get('failed_updates')}",
-        "",
-        "Failed VINs:",
     ]
-    for item in failures:
-        lines.append(f"- {item.get('vin')}: {item.get('error')}")
+    if has_failures:
+        lines.append("")
+        lines.append("Failed VINs:")
+        for item in failures:
+            lines.append(f"- {item.get('vin')}: {item.get('error')}")
     body = "\n".join(lines)
     try:
         notifier.send(
-            subject=f"NZTA VIN sync failures for {filename}",
+            subject=(
+                f"NZTA VIN sync failures for {filename}"
+                if has_failures
+                else f"NZTA VIN sync success for {filename}"
+            ),
             body=body,
         )
     except Exception:  # noqa: BLE001
         logging.exception("Failed to send processing summary email")
+
+
+def _notify_no_files(notifier: EmailNotifier) -> None:
+    if not notifier:
+        return
+    try:
+        notifier.send(
+            subject="NZTA VIN sync ran with no files",
+            body=(
+                "The NZTA deregistered VIN sync executed successfully, "
+                "but no FTP files matched the configured pattern."
+            ),
+        )
+    except Exception:  # noqa: BLE001
+        logging.exception("Failed to send no-files notification email")

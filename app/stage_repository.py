@@ -1,4 +1,5 @@
 import logging
+import time
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -17,6 +18,9 @@ class StagedEntry:
 
 
 class StageRepository:
+    STREAMING_BUFFER_RETRIES = 5
+    STREAMING_BUFFER_DELAY_SECONDS = 5
+
     def __init__(
         self,
         dataset: str,
@@ -57,7 +61,7 @@ class StageRepository:
                 bigquery.SchemaField("status", "STRING"),
                 bigquery.SchemaField("date_created", "TIMESTAMP"),
                 bigquery.SchemaField("date_modified", "TIMESTAMP"),
-                bigquery.SchemaField("gcs_uri", "STRING"),
+                bigquery.SchemaField("source_filename", "STRING"),
                 bigquery.SchemaField("error_message", "STRING"),
             ]
             table = bigquery.Table(table_ref, schema=schema)
@@ -70,7 +74,7 @@ class StageRepository:
             logging.info("Created BigQuery table %s", self._table_id)
 
     def stage_records(
-        self, records: Iterable[VehicleRecord], gcs_uri: str
+        self, records: Iterable[VehicleRecord], source_filename: str
     ) -> List[StagedEntry]:
         staged: List[StagedEntry] = []
         rows = []
@@ -90,7 +94,7 @@ class StageRepository:
                     "status": "pending",
                     "date_created": now,
                     "date_modified": now,
-                    "gcs_uri": gcs_uri,
+                    "source_filename": source_filename,
                     "error_message": None,
                 }
             )
@@ -108,14 +112,14 @@ class StageRepository:
     def record_error(self, stage_id: str, error_message: str) -> None:
         self._update_status(stage_id, "failed", error_message)
 
-    def mark_failed_by_gcs(self, gcs_uri: str, error_message: str) -> bool:
-        """Mark every pending row tied to a GCS object as failed."""
+    def mark_failed_by_file(self, source_filename: str, error_message: str) -> bool:
+        """Mark every pending row tied to a staged file as failed."""
         query = f"""
         UPDATE `{self._table_id}`
         SET status = 'failed',
             error_message = @error,
             date_modified = @modified
-        WHERE gcs_uri = @gcs_uri AND status = 'pending'
+        WHERE source_filename = @file_name AND status = 'pending'
         """
         return self._run_update_query(
             query,
@@ -126,7 +130,7 @@ class StageRepository:
                     "TIMESTAMP",
                     datetime.now(timezone.utc).isoformat(),
                 ),
-                bigquery.ScalarQueryParameter("gcs_uri", "STRING", gcs_uri),
+                bigquery.ScalarQueryParameter("file_name", "STRING", source_filename),
             ],
         )
 
@@ -156,20 +160,6 @@ class StageRepository:
             records.append(StagedEntry(stage_id=row["id"], record=vehicle))
         return records
 
-    def update_gcs_uri(self, old_uri: str, new_uri: str) -> bool:
-        query = f"""
-        UPDATE `{self._table_id}`
-        SET gcs_uri = @new_uri
-        WHERE gcs_uri = @old_uri
-        """
-        return self._run_update_query(
-            query,
-            [
-                bigquery.ScalarQueryParameter("new_uri", "STRING", new_uri),
-                bigquery.ScalarQueryParameter("old_uri", "STRING", old_uri),
-            ],
-        )
-
     def _update_status(
         self, stage_id: str, status: str, error_message: Optional[str]
     ) -> None:
@@ -198,18 +188,27 @@ class StageRepository:
         self, query: str, parameters: List[bigquery.ScalarQueryParameter]
     ) -> bool:
         """Execute a BigQuery mutation, tolerating streaming-buffer limitations."""
-        try:
-            self.client.query(
-                query,
-                job_config=bigquery.QueryJobConfig(query_parameters=parameters),
-            ).result()
-            return True
-        except BadRequest as exc:
-            message = getattr(exc, "message", str(exc))
-            if message and "streaming buffer" in message.lower():
-                logging.warning(
-                    "Deferring BigQuery mutation; rows still in streaming buffer: %s",
-                    message,
-                )
-                return False
-            raise
+        attempts = 0
+        while True:
+            try:
+                self.client.query(
+                    query,
+                    job_config=bigquery.QueryJobConfig(query_parameters=parameters),
+                ).result()
+                return True
+            except BadRequest as exc:
+                message = getattr(exc, "message", str(exc))
+                if (
+                    message
+                    and "streaming buffer" in message.lower()
+                    and attempts < self.STREAMING_BUFFER_RETRIES
+                ):
+                    attempts += 1
+                    logging.warning(
+                        "BigQuery mutation blocked by streaming buffer (attempt %s/%s); retrying",
+                        attempts,
+                        self.STREAMING_BUFFER_RETRIES,
+                    )
+                    time.sleep(self.STREAMING_BUFFER_DELAY_SECONDS)
+                    continue
+                raise
