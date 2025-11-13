@@ -86,7 +86,10 @@ class SugarCrmClient:
     def _auth_headers(self) -> dict[str, str]:
         if not self._access_token:
             raise RuntimeError("SugarCRM client not authenticated")
-        return {"Authorization": f"Bearer {self._access_token}"}
+        return {
+            "Authorization": f"Bearer {self._access_token}",
+            "OAuth-Token": self._access_token,
+        }
 
     def _request(self, method: str, url: str, **kwargs) -> requests.Response:
         if "timeout" not in kwargs:
