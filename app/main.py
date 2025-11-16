@@ -22,15 +22,19 @@ app = Flask(__name__)
 
 @app.route("/", methods=["GET", "POST"])
 def entrypoint():
+    mode = os.getenv("SERVICE_MODE", "ingest").lower()
     if request.method == "GET":
-        return jsonify({"status": "ready"})
+        return jsonify({"status": "ready", "mode": mode})
 
     event_payload = _decode_pubsub(request.get_json(silent=True))
-    summary = execute_pipeline(event_payload)
+    if mode == "sync":
+        summary = execute_sync_pipeline(event_payload)
+    else:
+        summary = execute_ingest_pipeline(event_payload)
     return jsonify(summary)
 
 
-def execute_pipeline(trigger_payload: Dict[str, Any]) -> Dict[str, Any]:
+def execute_ingest_pipeline(trigger_payload: Dict[str, Any]) -> Dict[str, Any]:
     config = AppConfig.from_env()
     notifier = build_notifier(config.email)
     ftp = FtpDownloader(
@@ -58,18 +62,6 @@ def execute_pipeline(trigger_payload: Dict[str, Any]) -> Dict[str, Any]:
     processed_reports: List[Dict[str, Any]] = []
     temp_dir = Path(tempfile.mkdtemp())
     try:
-        sugar = SugarCrmClient(
-            base_url=config.sugar_base_url,
-            username=config.sugar_username,
-            password=config.sugar_password,
-            client_id=config.sugar_client_id,
-            client_secret=config.sugar_client_secret,
-            platform=config.sugar_platform,
-            grant_type=config.sugar_grant_type,
-            timeout=config.sugar_timeout,
-        )
-        sugar.authenticate()
-
         found_file = False
         for filename, remote_file, local_path in ftp.iter_downloads(
             remote_path=config.ftp_remote_path,
@@ -79,7 +71,7 @@ def execute_pipeline(trigger_payload: Dict[str, Any]) -> Dict[str, Any]:
             found_file = True
             logging.info("Processing FTP file %s", filename)
             try:
-                report = _process_single_file(
+                report = _ingest_single_file(
                     filename=filename,
                     remote_file=remote_file,
                     local_path=local_path,
@@ -88,20 +80,22 @@ def execute_pipeline(trigger_payload: Dict[str, Any]) -> Dict[str, Any]:
                     config=config,
                     notifier=notifier,
                     trigger_payload=trigger_payload,
-                    sugar=sugar,
                     ftp=ftp,
                 )
                 processed_reports.append(report)
+                _notify_ingest_summary(notifier, report)
             except Exception as exc:  # noqa: BLE001
                 logging.exception("Failed to process file %s", filename)
-                processed_reports.append(
-                    {
-                        "source_filename": filename,
-                        "status": "error",
-                        "error": str(exc),
-                    }
-                )
-        if not found_file and notifier:
+                error_summary = {
+                    "source_filename": filename,
+                    "file_name": filename,
+                    "status": "error",
+                    "error": str(exc),
+                    "trigger_payload": trigger_payload,
+                }
+                processed_reports.append(error_summary)
+                _notify_ingest_summary(notifier, error_summary)
+        if not found_file:
             _notify_no_files(notifier)
     finally:
         for path in temp_dir.glob("*"):
@@ -112,6 +106,88 @@ def execute_pipeline(trigger_payload: Dict[str, Any]) -> Dict[str, Any]:
         "files_processed": len(processed_reports),
         "file_reports": processed_reports,
     }
+
+
+def execute_sync_pipeline(trigger_payload: Dict[str, Any]) -> Dict[str, Any]:
+    config = AppConfig.from_env()
+    notifier = build_notifier(config.email)
+    stage_repo = StageRepository(
+        dataset=config.bq_dataset,
+        table=config.bq_table,
+        location=config.bq_location,
+    )
+    stage_repo.ensure_resources()
+
+    sugar = SugarCrmClient(
+        base_url=config.sugar_base_url,
+        username=config.sugar_username,
+        password=config.sugar_password,
+        client_id=config.sugar_client_id,
+        client_secret=config.sugar_client_secret,
+        platform=config.sugar_platform,
+        grant_type=config.sugar_grant_type,
+        timeout=config.sugar_timeout,
+    )
+    sugar.authenticate()
+
+    entries = stage_repo.fetch_by_status()
+    if not entries:
+        summary = {
+            "records_processed": 0,
+            "successful_updates": 0,
+            "failed_updates": 0,
+            "file_names": [],
+            "status": "success",
+            "trigger_payload": trigger_payload,
+        }
+        _notify_sync_summary(notifier, summary, [])
+        return summary
+
+    successes = 0
+    failures: List[Dict[str, str]] = []
+    for entry in entries:
+        record = entry.record
+        try:
+            vehicle_id = sugar.find_vehicle_id(record.vin)
+            if not vehicle_id:
+                message = "Vehicle not found in SugarCRM"
+                stage_repo.record_error(entry.stage_id, message)
+                failures.append(
+                    {
+                        "vin": record.vin,
+                        "error": message,
+                        "file_name": entry.source_filename or "unknown",
+                    }
+                )
+                continue
+            sugar.update_vehicle(vehicle_id, record)
+            stage_repo.mark_pushed(entry.stage_id)
+            successes += 1
+        except Exception as exc:  # noqa: BLE001
+            logging.exception("Failed to sync VIN %s", record.vin)
+            stage_repo.record_error(entry.stage_id, str(exc))
+            failures.append(
+                {
+                    "vin": record.vin,
+                    "error": str(exc),
+                    "file_name": entry.source_filename or "unknown",
+                }
+            )
+
+    summary = {
+        "records_processed": len(entries),
+        "successful_updates": successes,
+        "failed_updates": len(failures),
+        "file_names": sorted(
+            {item.get("file_name", "unknown") for item in failures}
+        )
+        if failures
+        else [],
+        "status": "success" if not failures else "partial",
+        "trigger_payload": trigger_payload,
+    }
+    _notify_sync_summary(notifier, summary, failures)
+    return summary
 
 
 def _decode_pubsub(body: Dict[str, Any] | None) -> Dict[str, Any]:
@@ -127,7 +203,7 @@ def _decode_pubsub(body: Dict[str, Any] | None) -> Dict[str, Any]:
         return {"raw": decoded}
 
 
-def _process_single_file(
+def _ingest_single_file(
     filename: str,
     remote_file: str,
     local_path: Path,
@@ -136,7 +212,6 @@ def _process_single_file(
     config: AppConfig,
     notifier: EmailNotifier | None,
     trigger_payload: Dict[str, Any],
-    sugar: SugarCrmClient,
     ftp: FtpDownloader,
 ) -> Dict[str, Any]:
     uploaded_file = storage_writer.upload_raw(local_path)
@@ -168,42 +243,18 @@ def _process_single_file(
         processed_file = storage_writer.move_to_processed(uploaded_file)
         current_file = processed_file
 
-        entries = stage_repo.fetch_by_status()
-        successes = 0
-        failures: List[Dict[str, str]] = []
-        for entry in entries:
-            record = entry.record
-            try:
-                vehicle_id = sugar.find_vehicle_id(record.vin)
-                if not vehicle_id:
-                    message = "Vehicle not found in SugarCRM"
-                    stage_repo.record_error(entry.stage_id, message)
-                    failures.append({"vin": record.vin, "error": message})
-                    continue
-                sugar.update_vehicle(vehicle_id, record)
-                stage_repo.mark_pushed(entry.stage_id)
-                successes += 1
-            except Exception as exc:  # noqa: BLE001
-                logging.exception("Failed to sync VIN %s", record.vin)
-                stage_repo.record_error(entry.stage_id, str(exc))
-                failures.append({"vin": record.vin, "error": str(exc)})
-
         summary = {
             "source_filename": filename,
             "file_name": source_filename,
-            "processed_records": len(records),
-            "successful_updates": successes,
-            "failed_updates": len(failures),
-            "failures": failures,
+            "gcs_path": processed_file.uri,
+            "staged_records": len(records),
             "trigger_payload": trigger_payload,
+            "status": "success",
         }
 
-        _notify_processing_summary(notifier, filename, summary, failures)
-
-        summary["status"] = "success"
         return summary
     except Exception as exc:
-        failure_message = f"Failed to process {filename}: {exc}"
+        failure_message = f"Failed to ingest {filename}: {exc}"
         if current_file:
             error_file = storage_writer.move_to_error(current_file)
             current_file = error_file
@@ -241,9 +292,44 @@ def _handle_header_error(
         logging.exception("Failed to send header validation alert email")
 
 
-def _notify_processing_summary(
+def _notify_ingest_summary(
+    notifier: EmailNotifier | None, summary: Dict[str, Any] | None
+) -> None:
+    if not notifier:
+        return
+    if not summary:
+        return
+    has_error = summary.get("status") != "success"
+    filename = summary.get("source_filename")
+    lines = [
+        (
+            "NZTA deregistered VIN ingest succeeded."
+            if not has_error
+            else "NZTA deregistered VIN ingest failed."
+        ),
+        f"File: {filename}",
+        f"File name: {summary.get('file_name')}",
+        f"Staged records: {summary.get('staged_records', 0)}",
+        f"GCS path: {summary.get('gcs_path')}",
+    ]
+    if has_error and summary.get("error"):
+        lines.append(f"Error: {summary.get('error')}")
+    body = "\n".join(lines)
+    try:
+        notifier.send(
+            subject=(
+                f"NZTA ingest success for {filename}"
+                if not has_error
+                else f"NZTA ingest failure for {filename}"
+            ),
+            body=body,
+        )
+    except Exception:  # noqa: BLE001
+        logging.exception("Failed to send ingest summary email")
+
+
+def _notify_sync_summary(
     notifier: EmailNotifier | None,
-    filename: str,
     summary: Dict[str, Any],
     failures: List[Dict[str, str]],
 ) -> None:
@@ -256,13 +342,12 @@ def _notify_processing_summary(
             if has_failures
             else "NZTA deregistered VIN sync completed successfully."
         ),
-        f"File: {filename}",
-        f"File name: {summary.get('file_name')}",
-        f"Processed records: {summary.get('processed_records')}",
+        f"Records processed: {summary.get('records_processed')}",
         f"Successful updates: {summary.get('successful_updates')}",
         f"Failed updates: {summary.get('failed_updates')}",
     ]
     if has_failures:
+        lines.append(f"Affected files: {', '.join(summary.get('file_names') or []) or 'unknown'}")
         lines.append("")
         lines.append("Failed VINs:")
         for item in failures:
@@ -271,24 +356,24 @@ def _notify_processing_summary(
     try:
         notifier.send(
             subject=(
-                f"NZTA VIN sync failures for {filename}"
+                "NZTA VIN sync failures"
                 if has_failures
-                else f"NZTA VIN sync success for {filename}"
+                else "NZTA VIN sync success"
             ),
             body=body,
         )
     except Exception:  # noqa: BLE001
-        logging.exception("Failed to send processing summary email")
+        logging.exception("Failed to send sync summary email")
 
 
-def _notify_no_files(notifier: EmailNotifier) -> None:
+def _notify_no_files(notifier: EmailNotifier | None) -> None:
     if not notifier:
         return
     try:
         notifier.send(
-            subject="NZTA VIN sync ran with no files",
+            subject="NZTA VIN ingest ran with no files",
             body=(
-                "The NZTA deregistered VIN sync executed successfully, "
+                "The NZTA deregistered VIN ingest executed successfully, "
                 "but no FTP files matched the configured pattern."
             ),
         )

@@ -1,10 +1,23 @@
 substitutions:
   # Region where Cloud Run, Scheduler, and Artifact Registry operate.
   _REGION: australia-southeast1
-  # Cloud Run service hosting the ingestion pipeline.
-  _SERVICE: all-brands-nzta-deregistered-vins-sync
   # Artifact Registry repository used for versioned images.
   _REPO: all-brands-nzta-deregistered-vins
+  # Base image name shared by both Cloud Run services.
+  _IMAGE_NAME: all-brands-nzta-deregistered-vins
+  # Cloud Run service names.
+  _INGEST_SERVICE: all-brands-nzta-deregistered-vins-ingest
+  _SYNC_SERVICE: all-brands-nzta-deregistered-vins-sync
+  # Pub/Sub resources.
+  _INGEST_TOPIC: all-brands-nzta-deregistered-vins-ingest-trigger
+  _SYNC_TOPIC: all-brands-nzta-deregistered-vins-sync-trigger
+  _INGEST_SUB: all-brands-nzta-deregistered-vins-ingest-runner
+  _SYNC_SUB: all-brands-nzta-deregistered-vins-sync-runner
+  # Scheduler jobs + cron specs (NZT).
+  _INGEST_JOB: all-brands-nzta-deregistered-vins-ingest-daily
+  _SYNC_JOB: all-brands-nzta-deregistered-vins-sync-daily
+  _INGEST_SCHEDULE: "0 5 * * *"
+  _SYNC_SCHEDULE: "0 6 * * *"
 
 logsBucket: gs://ib4t-integration-adh-data-utopia-cloudbuild-logs
 
@@ -32,10 +45,10 @@ steps:
           gcloud artifacts repositories create "$_REPO" \
             --repository-format=docker \
             --location="$_REGION" \
-            --description="Container images for the NZTA deregistered VIN sync pipeline"
+            --description="Container images for the NZTA deregistered VIN pipelines"
         fi
 
-  # 1) Guarantee the GCS landing bucket exists (no delete to retain audit files).
+  # 2) Guarantee the GCS landing bucket exists (no delete to retain audit files).
   - name: gcr.io/google.com/cloudsdktool/cloud-sdk
     entrypoint: bash
     args:
@@ -44,44 +57,46 @@ steps:
         set -euo pipefail
         BUCKET="${_GCS_BUCKET:-all-brands-nzta-deregistered-vins-temp-do-not-delete}"
         if ! gsutil ls -b "gs://$${BUCKET}" >/dev/null 2>&1; then
-          gsutil mb -l $_REGION "gs://$${BUCKET}"
+          gsutil mb -l "$_REGION" "gs://$${BUCKET}"
         fi
 
-  # 1) Guarantee the Pub/Sub topic exists so later steps can bind to it.
+  # 3) Guarantee the Pub/Sub topics exist.
   - name: gcr.io/google.com/cloudsdktool/cloud-sdk
     entrypoint: bash
     args:
       - -c
       - |
         set -euo pipefail
-        gcloud pubsub topics describe all-brands-nzta-deregistered-vins-sync-trigger >/dev/null 2>&1 || \
-        gcloud pubsub topics create all-brands-nzta-deregistered-vins-sync-trigger
+        for topic in "$_INGEST_TOPIC" "$_SYNC_TOPIC"; do
+          gcloud pubsub topics describe "$topic" >/dev/null 2>&1 || \
+          gcloud pubsub topics create "$topic"
+        done
 
-  # 2) Build the Cloud Run container image from the current workspace.
+  # 4) Build the Cloud Run container image from the current workspace.
   - name: gcr.io/cloud-builders/docker
     args:
       [
         "build",
         "-t",
-        "$_REGION-docker.pkg.dev/adh-data-utopia/$_REPO/$_SERVICE:$SHORT_SHA",
+        "$_REGION-docker.pkg.dev/adh-data-utopia/$_REPO/$_IMAGE_NAME:$SHORT_SHA",
         ".",
       ]
 
-  # 3) Push the image to Artifact Registry so Cloud Run can pull it.
+  # 5) Push the image to Artifact Registry so Cloud Run can pull it.
   - name: gcr.io/cloud-builders/docker
     args:
       [
         "push",
-        "$_REGION-docker.pkg.dev/adh-data-utopia/$_REPO/$_SERVICE:$SHORT_SHA",
+        "$_REGION-docker.pkg.dev/adh-data-utopia/$_REPO/$_IMAGE_NAME:$SHORT_SHA",
       ]
 
-  # 4) Deploy (or update) the Cloud Run service with secret-driven env vars.
+  # 6) Deploy (or update) the ingest Cloud Run service.
   - name: gcr.io/google.com/cloudsdktool/cloud-sdk
     entrypoint: gcloud
     args:
       [
-        "run","deploy","$_SERVICE",
-        "--image","$_REGION-docker.pkg.dev/adh-data-utopia/$_REPO/$_SERVICE:$SHORT_SHA",
+        "run","deploy","$_INGEST_SERVICE",
+        "--image","$_REGION-docker.pkg.dev/adh-data-utopia/$_REPO/$_IMAGE_NAME:$SHORT_SHA",
         "--region","$_REGION",
         "--platform","managed",
         "--allow-unauthenticated",
@@ -89,62 +104,111 @@ steps:
         "--max-instances","1",
         "--service-account","ib4t-integration@adh-data-utopia.iam.gserviceaccount.com",
         "--set-env-vars",
-        "FTP_CONFIG_SECRET=${_FTP_CONFIG_SECRET},SUGAR_CONFIG_SECRET=${_SUGAR_CONFIG_SECRET},FTP_REMOTE_PATH=${_FTP_REMOTE_PATH},FTP_FILE_PATTERN=${_FTP_FILE_PATTERN},GCS_BUCKET=${_GCS_BUCKET},GCS_RAW_PREFIX=${_GCS_RAW_PREFIX},GCS_PROCESSED_PREFIX=${_GCS_PROCESSED_PREFIX},GCS_ERROR_PREFIX=${_GCS_ERROR_PREFIX},ALLOWED_MAKES=${_ALLOWED_MAKES},BQ_STAGE_DATASET=${_BQ_STAGE_DATASET},BQ_STAGE_TABLE=${_BQ_STAGE_TABLE},BQ_STAGE_LOCATION=${_BQ_STAGE_LOCATION},EMAIL_SENDER=${_EMAIL_SENDER},EMAIL_RECIPIENTS=${_EMAIL_RECIPIENTS},SMTP_HOST=${_SMTP_HOST},SMTP_PORT=${_SMTP_PORT},SMTP_USERNAME=${_SMTP_USERNAME},SMTP_PASSWORD=${_SMTP_PASSWORD},SMTP_USE_TLS=${_SMTP_USE_TLS},SMTP_TIMEOUT=${_SMTP_TIMEOUT},LOG_LEVEL=${_LOG_LEVEL}"
+        "FTP_CONFIG_SECRET=${_FTP_CONFIG_SECRET},SUGAR_CONFIG_SECRET=${_SUGAR_CONFIG_SECRET},FTP_REMOTE_PATH=${_FTP_REMOTE_PATH},FTP_FILE_PATTERN=${_FTP_FILE_PATTERN},GCS_BUCKET=${_GCS_BUCKET},GCS_RAW_PREFIX=${_GCS_RAW_PREFIX},GCS_PROCESSED_PREFIX=${_GCS_PROCESSED_PREFIX},GCS_ERROR_PREFIX=${_GCS_ERROR_PREFIX},ALLOWED_MAKES=${_ALLOWED_MAKES},BQ_STAGE_DATASET=${_BQ_STAGE_DATASET},BQ_STAGE_TABLE=${_BQ_STAGE_TABLE},BQ_STAGE_LOCATION=${_BQ_STAGE_LOCATION},EMAIL_SENDER=${_EMAIL_SENDER},EMAIL_RECIPIENTS=${_EMAIL_RECIPIENTS},SMTP_HOST=${_SMTP_HOST},SMTP_PORT=${_SMTP_PORT},SMTP_USERNAME=${_SMTP_USERNAME},SMTP_PASSWORD=${_SMTP_PASSWORD},SMTP_USE_TLS=${_SMTP_USE_TLS},SMTP_TIMEOUT=${_SMTP_TIMEOUT},LOG_LEVEL=${_LOG_LEVEL},SERVICE_MODE=ingest"
       ]
 
-  # 5) Let the Pub/Sub push identity invoke the Cloud Run endpoint.
+  # 7) Deploy (or update) the sync Cloud Run service.
   - name: gcr.io/google.com/cloudsdktool/cloud-sdk
     entrypoint: gcloud
     args:
       [
-        "run","services","add-iam-policy-binding","$_SERVICE",
+        "run","deploy","$_SYNC_SERVICE",
+        "--image","$_REGION-docker.pkg.dev/adh-data-utopia/$_REPO/$_IMAGE_NAME:$SHORT_SHA",
         "--region","$_REGION",
-        "--member","serviceAccount:ib4t-integration@adh-data-utopia.iam.gserviceaccount.com",
-        "--role","roles/run.invoker"
+        "--platform","managed",
+        "--allow-unauthenticated",
+        "--timeout","900",
+        "--max-instances","1",
+        "--service-account","ib4t-integration@adh-data-utopia.iam.gserviceaccount.com",
+        "--set-env-vars",
+        "FTP_CONFIG_SECRET=${_FTP_CONFIG_SECRET},SUGAR_CONFIG_SECRET=${_SUGAR_CONFIG_SECRET},FTP_REMOTE_PATH=${_FTP_REMOTE_PATH},FTP_FILE_PATTERN=${_FTP_FILE_PATTERN},GCS_BUCKET=${_GCS_BUCKET},GCS_RAW_PREFIX=${_GCS_RAW_PREFIX},GCS_PROCESSED_PREFIX=${_GCS_PROCESSED_PREFIX},GCS_ERROR_PREFIX=${_GCS_ERROR_PREFIX},ALLOWED_MAKES=${_ALLOWED_MAKES},BQ_STAGE_DATASET=${_BQ_STAGE_DATASET},BQ_STAGE_TABLE=${_BQ_STAGE_TABLE},BQ_STAGE_LOCATION=${_BQ_STAGE_LOCATION},EMAIL_SENDER=${_EMAIL_SENDER},EMAIL_RECIPIENTS=${_EMAIL_RECIPIENTS},SMTP_HOST=${_SMTP_HOST},SMTP_PORT=${_SMTP_PORT},SMTP_USERNAME=${_SMTP_USERNAME},SMTP_PASSWORD=${_SMTP_PASSWORD},SMTP_USE_TLS=${_SMTP_USE_TLS},SMTP_TIMEOUT=${_SMTP_TIMEOUT},LOG_LEVEL=${_LOG_LEVEL},SERVICE_MODE=sync"
       ]
 
-  # 6) Recreate the push subscription pointing to the fresh service URL.
+  # 8) Grant the Pub/Sub push identity invoke rights on both services.
   - name: gcr.io/google.com/cloudsdktool/cloud-sdk
     entrypoint: bash
     args:
       - -c
       - |
         set -euo pipefail
-        SERVICE_URL="$(gcloud run services describe $_SERVICE --region $_REGION --format='value(status.url)')"
-        if gcloud pubsub subscriptions describe all-brands-nzta-deregistered-vins-runner >/dev/null 2>&1; then
-          gcloud pubsub subscriptions delete all-brands-nzta-deregistered-vins-runner --quiet
+        for svc in "$_INGEST_SERVICE" "$_SYNC_SERVICE"; do
+          gcloud run services add-iam-policy-binding "$svc" \
+            --region="$_REGION" \
+            --member="serviceAccount:ib4t-integration@adh-data-utopia.iam.gserviceaccount.com" \
+            --role="roles/run.invoker"
+        done
+
+  # 9) Recreate the push subscription pointing to the ingest service URL.
+  - name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        set -euo pipefail
+        SERVICE_URL="$(gcloud run services describe $_INGEST_SERVICE --region $_REGION --format='value(status.url)')"
+        if gcloud pubsub subscriptions describe "$_INGEST_SUB" >/dev/null 2>&1; then
+          gcloud pubsub subscriptions delete "$_INGEST_SUB" --quiet
         fi
-        gcloud pubsub subscriptions create all-brands-nzta-deregistered-vins-runner \
-          --topic=all-brands-nzta-deregistered-vins-sync-trigger \
+        gcloud pubsub subscriptions create "$_INGEST_SUB" \
+          --topic="$_INGEST_TOPIC" \
           --push-endpoint="$${SERVICE_URL}/" \
           --push-auth-service-account="ib4t-integration@adh-data-utopia.iam.gserviceaccount.com"
 
-  # 7) Create or update the Scheduler job that publishes weekly triggers.
+  # 10) Recreate the push subscription pointing to the sync service URL.
   - name: gcr.io/google.com/cloudsdktool/cloud-sdk
     entrypoint: bash
     args:
       - -c
       - |
         set -euo pipefail
-        JOB_NAME="all-brands-nzta-deregistered-vins-weekly"
-        SCHEDULE="0 3 * * 2"  # Tuesdays at 03:00 NZT.
+        SERVICE_URL="$(gcloud run services describe $_SYNC_SERVICE --region $_REGION --format='value(status.url)')"
+        if gcloud pubsub subscriptions describe "$_SYNC_SUB" >/dev/null 2>&1; then
+          gcloud pubsub subscriptions delete "$_SYNC_SUB" --quiet
+        fi
+        gcloud pubsub subscriptions create "$_SYNC_SUB" \
+          --topic="$_SYNC_TOPIC" \
+          --push-endpoint="$${SERVICE_URL}/" \
+          --push-auth-service-account="ib4t-integration@adh-data-utopia.iam.gserviceaccount.com"
+
+  # 11) Create or update the Scheduler jobs that publish daily triggers.
+  - name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        set -euo pipefail
         TZ="Pacific/Auckland"
-        if gcloud scheduler jobs describe $${JOB_NAME} --location="$_REGION" >/dev/null 2>&1; then
-          gcloud scheduler jobs update pubsub $${JOB_NAME} \
+        if gcloud scheduler jobs describe "$_INGEST_JOB" --location="$_REGION" >/dev/null 2>&1; then
+          gcloud scheduler jobs update pubsub "$_INGEST_JOB" \
             --location="$_REGION" \
-            --schedule="$${SCHEDULE}" \
+            --schedule="$_INGEST_SCHEDULE" \
             --time-zone="$${TZ}" \
-            --topic=all-brands-nzta-deregistered-vins-sync-trigger \
+            --topic="$_INGEST_TOPIC" \
             --message-body="{}"
         else
-          gcloud scheduler jobs create pubsub $${JOB_NAME} \
+          gcloud scheduler jobs create pubsub "$_INGEST_JOB" \
             --location="$_REGION" \
-            --schedule="$${SCHEDULE}" \
+            --schedule="$_INGEST_SCHEDULE" \
             --time-zone="$${TZ}" \
-            --topic=all-brands-nzta-deregistered-vins-sync-trigger \
+            --topic="$_INGEST_TOPIC" \
+            --message-body="{}"
+        fi
+        if gcloud scheduler jobs describe "$_SYNC_JOB" --location="$_REGION" >/dev/null 2>&1; then
+          gcloud scheduler jobs update pubsub "$_SYNC_JOB" \
+            --location="$_REGION" \
+            --schedule="$_SYNC_SCHEDULE" \
+            --time-zone="$${TZ}" \
+            --topic="$_SYNC_TOPIC" \
+            --message-body="{}"
+        else
+          gcloud scheduler jobs create pubsub "$_SYNC_JOB" \
+            --location="$_REGION" \
+            --schedule="$_SYNC_SCHEDULE" \
+            --time-zone="$${TZ}" \
+            --topic="$_SYNC_TOPIC" \
             --message-body="{}"
         fi
 
 images:
   # Artifact reference recorded for reproducibility/auditing.
-  - "$_REGION-docker.pkg.dev/adh-data-utopia/$_REPO/$_SERVICE:$SHORT_SHA"
+  - "$_REGION-docker.pkg.dev/adh-data-utopia/$_REPO/$_IMAGE_NAME:$SHORT_SHA"

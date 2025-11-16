@@ -15,6 +15,7 @@ from app.csv_processor import VehicleRecord
 class StagedEntry:
     stage_id: str
     record: VehicleRecord
+    source_filename: Optional[str] = None
 
 
 class StageRepository:
@@ -82,7 +83,13 @@ class StageRepository:
 
         for record in records:
             stage_id = str(uuid.uuid4())
-            staged.append(StagedEntry(stage_id=stage_id, record=record))
+            staged.append(
+                StagedEntry(
+                    stage_id=stage_id,
+                    record=record,
+                    source_filename=source_filename,
+                )
+            )
             rows.append(
                 {
                     "id": stage_id,
@@ -136,7 +143,7 @@ class StageRepository:
 
     def fetch_by_status(self, status: str = "pending") -> list[StagedEntry]:
         query = f"""
-        SELECT id, vin, vehicle_make, vehicle_model, dereg_date, reg_plate
+        SELECT id, vin, vehicle_make, vehicle_model, dereg_date, reg_plate, source_filename
         FROM `{self._table_id}`
         WHERE status = @status
         """
@@ -157,7 +164,13 @@ class StageRepository:
                 dereg_date=row["dereg_date"] or "",
                 rego=row["reg_plate"] or "",
             )
-            records.append(StagedEntry(stage_id=row["id"], record=vehicle))
+            records.append(
+                StagedEntry(
+                    stage_id=row["id"],
+                    record=vehicle,
+                    source_filename=row.get("source_filename"),
+                )
+            )
         return records
 
     def _update_status(
