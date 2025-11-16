@@ -77,8 +77,11 @@ class AppConfig:
         email_settings = None
         smtp_host = os.getenv("SMTP_HOST")
         if smtp_host:
+            sender = os.getenv("FROM_EMAIL_ADDRESS") or os.getenv(
+                "EMAIL_SENDER", "noreply@ib4t.co"
+            )
             email_settings = EmailSettings(
-                sender=os.getenv("EMAIL_SENDER", "noreply@ib4t.co"),
+                sender=sender,
                 recipients=email_recipients or ["ssaleem@ib4t.co"],
                 smtp_host=smtp_host,
                 smtp_port=int(os.getenv("SMTP_PORT", "587")),

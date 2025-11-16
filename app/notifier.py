@@ -9,12 +9,19 @@ from app.config import EmailSettings
 class EmailNotifier:
     def __init__(self, settings: EmailSettings) -> None:
         self.settings = settings
+        from_env = os.getenv("SERVICE_MODE")
+        service_name = os.getenv("SERVICE_NAME") or os.getenv(
+            "K_SERVICE"
+        ) or os.getenv("GCP_SERVICE_NAME")
+        self._subject_prefix = ""
+        if service_name:
+            self._subject_prefix = f"[{service_name}] "
 
     def send(self, subject: str, body: str) -> None:
         message = EmailMessage()
         message["From"] = self.settings.sender
         message["To"] = ", ".join(self.settings.recipients)
-        message["Subject"] = subject
+        message["Subject"] = f"{self._subject_prefix}{subject}"
         message.set_content(body)
 
         logging.debug(
