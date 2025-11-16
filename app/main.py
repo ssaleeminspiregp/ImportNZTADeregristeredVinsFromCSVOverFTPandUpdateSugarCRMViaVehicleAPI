@@ -135,7 +135,8 @@ def execute_sync_pipeline(trigger_payload: Dict[str, Any]) -> Dict[str, Any]:
     )
     sugar.authenticate()
 
-    entries = stage_repo.fetch_by_status()
+    min_age = int(os.getenv("SYNC_MIN_PENDING_AGE_MINUTES", "2"))
+    entries = stage_repo.fetch_by_status(min_age_minutes=min_age)
     if not entries:
         summary = {
             "records_processed": 0,

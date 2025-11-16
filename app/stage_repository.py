@@ -141,17 +141,19 @@ class StageRepository:
             ],
         )
 
-    def fetch_by_status(self, status: str = "pending") -> list[StagedEntry]:
+    def fetch_by_status(self, status: str = "pending", min_age_minutes: int = 0) -> list[StagedEntry]:
         query = f"""
         SELECT id, vin, vehicle_make, vehicle_model, dereg_date, reg_plate, source_filename
         FROM `{self._table_id}`
         WHERE status = @status
+        AND (@min_age = 0 OR date_created < TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL @min_age MINUTE))
         """
         job = self.client.query(
             query,
             job_config=bigquery.QueryJobConfig(
                 query_parameters=[
                     bigquery.ScalarQueryParameter("status", "STRING", status),
+                    bigquery.ScalarQueryParameter("min_age", "INT64", min_age_minutes),
                 ]
             ),
         )

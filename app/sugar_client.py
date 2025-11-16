@@ -72,9 +72,11 @@ class SugarCrmClient:
         if not self._access_token:
             raise RuntimeError("SugarCRM client not authenticated")
         url = urljoin(self.base_url, f"rest/v11_20/VHE_Vehicle/{vehicle_id}")
+        target_status = "Deregistered"
+        target_date = self._format_date(record.dereg_date)
         payload = {
-            "vehicle_status_c": "Deregistered",
-            "latest_dereg_date_c": self._format_date(record.dereg_date),
+            "vehicle_status_c": target_status,
+            "latest_dereg_date_c": target_date,
         }
         response = self._request("put", url, json=payload)
         logging.debug(
@@ -83,6 +85,18 @@ class SugarCrmClient:
             self._short_response(response),
         )
         response.raise_for_status()
+        try:
+            body = response.json()
+        except ValueError as exc:  # noqa: BLE001
+            raise RuntimeError("SugarCRM update returned non-JSON payload") from exc
+
+        actual_status = body.get("vehicle_status_c")
+        actual_date = body.get("latest_dereg_date_c")
+        if actual_status != target_status or actual_date != target_date:
+            raise RuntimeError(
+                "SugarCRM update did not persist expected values: "
+                f"status={actual_status}, date={actual_date}"
+            )
 
     def _auth_headers(self) -> dict[str, str]:
         if not self._access_token:
