@@ -37,6 +37,9 @@ def entrypoint():
 def execute_ingest_pipeline(trigger_payload: Dict[str, Any]) -> Dict[str, Any]:
     config = AppConfig.from_env()
     notifier = build_notifier(config.email)
+    if not notifier:
+        logging.info("Email notifier disabled; ingest emails will not be sent")
+
     ftp = FtpDownloader(
         host=config.ftp_host,
         port=config.ftp_port,
@@ -111,6 +114,8 @@ def execute_ingest_pipeline(trigger_payload: Dict[str, Any]) -> Dict[str, Any]:
 def execute_sync_pipeline(trigger_payload: Dict[str, Any]) -> Dict[str, Any]:
     config = AppConfig.from_env()
     notifier = build_notifier(config.email)
+    if not notifier:
+        logging.info("Email notifier disabled; sync emails will not be sent")
     stage_repo = StageRepository(
         dataset=config.bq_dataset,
         table=config.bq_table,
@@ -316,6 +321,7 @@ def _notify_ingest_summary(
         lines.append(f"Error: {summary.get('error')}")
     body = "\n".join(lines)
     try:
+        logging.debug("Sending ingest summary email for %s", filename)
         notifier.send(
             subject=(
                 f"NZTA ingest success for {filename}"
@@ -354,6 +360,9 @@ def _notify_sync_summary(
             lines.append(f"- {item.get('vin')}: {item.get('error')}")
     body = "\n".join(lines)
     try:
+        logging.debug(
+            "Sending sync summary email (failures=%s)", len(failures)
+        )
         notifier.send(
             subject=(
                 "NZTA VIN sync failures"
@@ -370,6 +379,7 @@ def _notify_no_files(notifier: EmailNotifier | None) -> None:
     if not notifier:
         return
     try:
+        logging.debug("Sending no-files notification email")
         notifier.send(
             subject="NZTA VIN ingest ran with no files",
             body=(
