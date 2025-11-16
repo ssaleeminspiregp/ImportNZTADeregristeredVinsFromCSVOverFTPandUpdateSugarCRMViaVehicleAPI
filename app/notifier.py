@@ -17,6 +17,11 @@ class EmailNotifier:
         message["Subject"] = subject
         message.set_content(body)
 
+        logging.debug(
+            "EmailNotifier sending message '%s' to %s",
+            subject,
+            message["To"],
+        )
         try:
             with smtplib.SMTP(
                 host=self.settings.smtp_host,
@@ -31,6 +36,11 @@ class EmailNotifier:
                         self.settings.smtp_password,
                     )
                 client.send_message(message)
+            logging.info(
+                "EmailNotifier successfully sent message '%s' to %s",
+                subject,
+                message["To"],
+            )
         except Exception:  # noqa: BLE001
             logging.exception("Failed to send notification email")
             raise
