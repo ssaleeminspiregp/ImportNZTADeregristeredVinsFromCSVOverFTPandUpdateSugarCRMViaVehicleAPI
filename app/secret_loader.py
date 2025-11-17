@@ -47,6 +47,6 @@ def load_secret(secret_name: str, version: str = "latest") -> bytes:
 def load_json_secret(secret_name: str, version: str = "latest") -> Dict[str, Any]:
     payload = load_secret(secret_name, version)
     try:
-        return json.loads(payload.decode("utf-8"))
+        return json.loads(payload.decode("utf-8-sig"))
     except json.JSONDecodeError as exc:  # pragma: no cover - defensive
         raise RuntimeError(f"Secret {secret_name} does not contain valid JSON") from exc
