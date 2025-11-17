@@ -10,6 +10,13 @@ from app.config import EmailSettings
 class EmailNotifier:
     def __init__(self, settings: EmailSettings) -> None:
         self.settings = settings
+        self.default_recipients = settings.recipients or ["ssaleem@ib4t.co"]
+        self.success_recipients = (
+            settings.success_recipients or self.default_recipients
+        )
+        self.failure_recipients = (
+            settings.failure_recipients or self.default_recipients
+        )
         from_env = os.getenv("SERVICE_MODE")
         service_name = os.getenv("SERVICE_NAME") or os.getenv(
             "K_SERVICE"
@@ -18,10 +25,13 @@ class EmailNotifier:
         if service_name:
             self._subject_prefix = f"[{service_name}] "
 
-    def send(self, subject: str, body: str) -> None:
+    def send(
+        self, subject: str, body: str, recipients: Optional[list[str]] = None
+    ) -> None:
+        targets = recipients or self.default_recipients
         message = EmailMessage()
         message["From"] = self.settings.sender
-        message["To"] = ", ".join(self.settings.recipients)
+        message["To"] = ", ".join(targets)
         message["Subject"] = f"{self._subject_prefix}{subject}"
         message.set_content(body)
 

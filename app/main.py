@@ -321,6 +321,9 @@ def _notify_ingest_summary(
     if has_error and summary.get("error"):
         lines.append(f"Error: {summary.get('error')}")
     body = "\n".join(lines)
+    targets = (
+        notifier.failure_recipients if has_error else notifier.success_recipients
+    )
     try:
         logging.debug("Sending ingest summary email for %s", filename)
         notifier.send(
@@ -330,6 +333,7 @@ def _notify_ingest_summary(
                 else f"NZTA ingest failure for {filename}"
             ),
             body=body,
+            recipients=targets,
         )
     except Exception:  # noqa: BLE001
         logging.exception("Failed to send ingest summary email")
@@ -359,6 +363,9 @@ def _notify_sync_summary(
         lines.append("Failed VINs:")
         for item in failures:
             lines.append(f"- {item.get('vin')}: {item.get('error')}")
+    targets = (
+        notifier.failure_recipients if has_failures else notifier.success_recipients
+    )
     body = "\n".join(lines)
     try:
         logging.debug(
@@ -371,6 +378,7 @@ def _notify_sync_summary(
                 else "NZTA VIN sync success"
             ),
             body=body,
+            recipients=targets,
         )
     except Exception:  # noqa: BLE001
         logging.exception("Failed to send sync summary email")
@@ -387,6 +395,7 @@ def _notify_no_files(notifier: EmailNotifier | None) -> None:
                 "The NZTA deregistered VIN ingest executed successfully, "
                 "but no FTP files matched the configured pattern."
             ),
+            recipients=notifier.success_recipients,
         )
     except Exception:  # noqa: BLE001
         logging.exception("Failed to send no-files notification email")
