@@ -23,6 +23,8 @@ def _require_field(source: Dict[str, Any], key: str, context: str) -> str:
 class EmailSettings:
     sender: str
     recipients: List[str]
+    success_recipients: List[str]
+    failure_recipients: List[str]
     smtp_host: str
     smtp_port: int
     smtp_username: Optional[str]
@@ -68,27 +70,51 @@ class AppConfig:
             for item in allowed.replace(",", "|").split("|")
             if item.strip()
         ]
-        recipients_raw = os.getenv("EMAIL_RECIPIENTS", "ssaleem@ib4t.co")
-        email_recipients = [
-            item.strip()
-            for item in recipients_raw.split(",")
-            if item.strip()
-        ]
+        email_secret_name = os.getenv("EMAIL_SERVER_CONFIG_SECRET")
+        email_secret = load_json_secret(email_secret_name) if email_secret_name else {}
+        default_recips = _parse_recipients(
+            os.getenv("EMAIL_RECIPIENTS") or email_secret.get("EMAIL_RECIPIENTS"),
+            ["ssaleem@ib4t.co"],
+        )
+        success_recips = _parse_recipients(
+            os.getenv("SUCCESS_EMAIL_RECIPIENTS")
+            or email_secret.get("SUCCESS_EMAIL_RECIPIENTS"),
+            ["ssaleem@ib4t.co"],
+        )
+        failure_recips = _parse_recipients(
+            os.getenv("ERROR_EMAIL_RECIPIENTS")
+            or email_secret.get("ERROR_EMAIL_RECIPIENTS"),
+            ["ssaleem@ib4t.co"],
+        )
         email_settings = None
-        smtp_host = os.getenv("SMTP_HOST")
+        smtp_host = os.getenv("SMTP_HOST") or email_secret.get("SMTP_HOST")
         if smtp_host:
-            sender = os.getenv("FROM_EMAIL_ADDRESS") or os.getenv(
-                "EMAIL_SENDER", "noreply@ib4t.co"
+            sender = (
+                os.getenv("EMAIL_SENDER")
+                or email_secret.get("EMAIL_SENDER")
+                or "noreply@ib4t.co"
             )
             email_settings = EmailSettings(
                 sender=sender,
-                recipients=email_recipients or ["ssaleem@ib4t.co"],
+                recipients=default_recips or ["ssaleem@ib4t.co"],
+                success_recipients=success_recips,
+                failure_recipients=failure_recips,
                 smtp_host=smtp_host,
-                smtp_port=int(os.getenv("SMTP_PORT", "587")),
-                smtp_username=os.getenv("SMTP_USERNAME"),
-                smtp_password=os.getenv("SMTP_PASSWORD"),
-                use_tls=os.getenv("SMTP_USE_TLS", "true").lower() not in {"false", "0"},
-                timeout=int(os.getenv("SMTP_TIMEOUT", "30")),
+                smtp_port=int(
+                    os.getenv("SMTP_PORT") or email_secret.get("SMTP_PORT", 25)
+                ),
+                smtp_username=os.getenv("SMTP_USERNAME")
+                or email_secret.get("SMTP_USERNAME"),
+                smtp_password=os.getenv("SMTP_PASSWORD")
+                or email_secret.get("SMTP_PASSWORD"),
+                use_tls=(
+                    os.getenv("SMTP_USE_TLS")
+                    or str(email_secret.get("SMTP_USE_TLS", "true"))
+                ).lower()
+                not in {"false", "0"},
+                timeout=int(
+                    os.getenv("SMTP_TIMEOUT") or email_secret.get("SMTP_TIMEOUT", 30)
+                ),
             )
 
         sugar_platform = "GcpNztaVinDeregIntegration"
@@ -137,3 +163,9 @@ class AppConfig:
             bq_location=os.getenv("BQ_STAGE_LOCATION", "australia-southeast1"),
             email=email_settings,
         )
+def _parse_recipients(value: Optional[str], default: List[str]) -> List[str]:
+    if not value:
+        return default
+    cleaned = value.replace("|", ",")
+    parsed = [item.strip() for item in cleaned.split(",") if item.strip()]
+    return parsed or default
