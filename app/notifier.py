@@ -57,8 +57,17 @@ class EmailNotifier:
                 if self.settings.debug:
                     client.set_debuglevel(1)
 
-                    def _smtp_debug_output(*args: str) -> None:
-                        logging.debug("SMTP raw: %s", "".join(args).strip())
+                    def _smtp_debug_output(*args: object) -> None:
+                        parts = []
+                        for arg in args:
+                            if isinstance(arg, bytes):
+                                try:
+                                    parts.append(arg.decode("utf-8", errors="ignore"))
+                                except Exception:
+                                    parts.append(str(arg))
+                            else:
+                                parts.append(str(arg))
+                        logging.debug("SMTP raw: %s", " ".join(parts).strip())
 
                     client._print_debug = _smtp_debug_output  # type: ignore[attr-defined]
 
