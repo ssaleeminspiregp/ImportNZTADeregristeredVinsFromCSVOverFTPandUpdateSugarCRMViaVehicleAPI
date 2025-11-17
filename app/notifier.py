@@ -40,20 +40,59 @@ class EmailNotifier:
             subject,
             message["To"],
         )
+        logging.debug(
+            "SMTP connect settings host=%s port=%s tls=%s debug=%s timeout=%s",
+            self.settings.smtp_host,
+            self.settings.smtp_port,
+            self.settings.use_tls,
+            self.settings.debug,
+            self.settings.timeout,
+        )
         try:
             with smtplib.SMTP(
                 host=self.settings.smtp_host,
                 port=self.settings.smtp_port,
                 timeout=self.settings.timeout,
             ) as client:
+                if self.settings.debug:
+                    client.set_debuglevel(1)
+
+                    def _smtp_debug_output(*args: str) -> None:
+                        logging.debug("SMTP raw: %s", "".join(args).strip())
+
+                    client._print_debug = _smtp_debug_output  # type: ignore[attr-defined]
+
+                def _log_response(label: str, response: tuple[int, bytes | str] | None) -> None:
+                    if not response:
+                        logging.debug("%s: <no response>", label)
+                        return
+                    code, msg = response
+                    if isinstance(msg, bytes):
+                        try:
+                            msg = msg.decode("utf-8", errors="ignore")
+                        except Exception:  # pragma: no cover - defensive
+                            msg = str(msg)
+                    logging.debug("%s: %s %s", label, code, msg)
+
+                _log_response("SMTP EHLO", client.ehlo())
                 if self.settings.use_tls:
-                    client.starttls()
+                    logging.debug("SMTP issuing STARTTLS")
+                    _log_response("SMTP STARTTLS", client.starttls())
+                    _log_response("SMTP post-STARTTLS EHLO", client.ehlo())
                 if self.settings.smtp_username and self.settings.smtp_password:
+                    logging.debug(
+                        "SMTP logging in as %s", self.settings.smtp_username
+                    )
                     client.login(
                         self.settings.smtp_username,
                         self.settings.smtp_password,
                     )
-                client.send_message(message)
+                    logging.debug("SMTP login successful")
+                refused = client.send_message(message)
+                if refused:
+                    logging.warning("SMTP refused recipients: %s", refused)
+                else:
+                    logging.debug("SMTP send_message accepted all recipients")
             logging.info(
                 "EmailNotifier successfully sent message '%s' to %s",
                 subject,

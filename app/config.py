@@ -31,6 +31,7 @@ class EmailSettings:
     smtp_password: Optional[str]
     use_tls: bool
     timeout: int
+    debug: bool
 
 
 @dataclass(frozen=True)
@@ -107,13 +108,14 @@ class AppConfig:
                 or email_secret.get("SMTP_USERNAME"),
                 smtp_password=os.getenv("SMTP_PASSWORD")
                 or email_secret.get("SMTP_PASSWORD"),
-                use_tls=(
-                    os.getenv("SMTP_USE_TLS")
-                    or str(email_secret.get("SMTP_USE_TLS", "true"))
-                ).lower()
-                not in {"false", "0"},
+                use_tls=_parse_bool(
+                    os.getenv("SMTP_USE_TLS"), email_secret.get("SMTP_USE_TLS", True)
+                ),
                 timeout=int(
                     os.getenv("SMTP_TIMEOUT") or email_secret.get("SMTP_TIMEOUT", 30)
+                ),
+                debug=_parse_bool(
+                    os.getenv("SMTP_DEBUG"), email_secret.get("SMTP_DEBUG", False)
                 ),
             )
 
@@ -169,3 +171,9 @@ def _parse_recipients(value: Optional[str], default: List[str]) -> List[str]:
     cleaned = value.replace("|", ",")
     parsed = [item.strip() for item in cleaned.split(",") if item.strip()]
     return parsed or default
+
+
+def _parse_bool(value: Optional[str], fallback: bool) -> bool:
+    if value is None:
+        return bool(fallback)
+    return str(value).strip().lower() not in {"false", "0", "", "no", "none"}
