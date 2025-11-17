@@ -90,7 +90,6 @@ def execute_ingest_pipeline(trigger_payload: Dict[str, Any]) -> Dict[str, Any]:
                     ftp=ftp,
                 )
                 processed_reports.append(report)
-                _notify_ingest_summary(notifier, report)
             except Exception as exc:  # noqa: BLE001
                 logging.exception("Failed to process file %s", filename)
                 error_summary = {
@@ -101,9 +100,14 @@ def execute_ingest_pipeline(trigger_payload: Dict[str, Any]) -> Dict[str, Any]:
                     "trigger_payload": trigger_payload,
                 }
                 processed_reports.append(error_summary)
-                _notify_ingest_summary(notifier, error_summary)
         if not found_file:
-            _notify_no_files(notifier)
+            _notify_no_files(
+                notifier,
+                remote_path=config.ftp_remote_path,
+                pattern=config.ftp_file_pattern,
+            )
+        else:
+            _notify_ingest_summary(notifier, processed_reports)
     finally:
         for path in temp_dir.glob("*"):
             path.unlink(missing_ok=True)
@@ -303,38 +307,43 @@ def _handle_header_error(
 
 
 def _notify_ingest_summary(
-    notifier: EmailNotifier | None, summary: Dict[str, Any] | None
+    notifier: EmailNotifier | None, summaries: List[Dict[str, Any]]
 ) -> None:
     if not notifier:
         return
-    if not summary:
+    if not summaries:
         return
-    has_error = summary.get("status") != "success"
-    filename = summary.get("source_filename")
-    lines = [
-        (
-            "NZTA deregistered VIN ingest succeeded."
-            if not has_error
-            else "NZTA deregistered VIN ingest failed."
-        ),
-        f"File: {filename}",
-        f"File name: {summary.get('file_name')}",
-        f"Staged records: {summary.get('staged_records', 0)}",
-        f"GCS path: {summary.get('gcs_path')}",
-    ]
-    if has_error and summary.get("error"):
-        lines.append(f"Error: {summary.get('error')}")
-    body = "\n".join(lines)
-    targets = (
-        notifier.failure_recipients if has_error else notifier.success_recipients
+    has_error = any(item.get("status") != "success" for item in summaries)
+    lines: List[str] = []
+    lines.append(
+        "NZTA deregistered VIN ingest completed successfully."
+        if not has_error
+        else "NZTA deregistered VIN ingest completed with failures."
     )
+    lines.append(f"Files processed: {len(summaries)}")
+    lines.append("")
+    lines.append("File results:")
+    for item in summaries:
+        status = item.get("status") or "unknown"
+        name = item.get("source_filename") or item.get("file_name") or "unknown"
+        summary_line = f"- {name}: {status}"
+        details: List[str] = [summary_line]
+        if status == "success":
+            details.append(f"  staged_records={item.get('staged_records', 0)}")
+            if item.get("gcs_path"):
+                details.append(f"  gcs_path={item.get('gcs_path')}")
+        if status != "success" and item.get("error"):
+            details.append(f"  error={item.get('error')}")
+        lines.extend(details)
+    body = "\n".join(lines)
+    targets = notifier.failure_recipients if has_error else notifier.success_recipients
     try:
-        logging.debug("Sending ingest summary email for %s", filename)
+        logging.debug("Sending aggregated ingest summary email")
         notifier.send(
             subject=(
-                f"NZTA ingest success for {filename}"
+                "NZTA ingest success"
                 if not has_error
-                else f"NZTA ingest failure for {filename}"
+                else "NZTA ingest partial/failure"
             ),
             body=body,
             recipients=targets,
@@ -388,17 +397,23 @@ def _notify_sync_summary(
         logging.exception("Failed to send sync summary email")
 
 
-def _notify_no_files(notifier: EmailNotifier | None) -> None:
+def _notify_no_files(
+    notifier: EmailNotifier | None, remote_path: str | None = None, pattern: str | None = None
+) -> None:
     if not notifier:
         return
+    location = remote_path or "(root)"
+    pattern_display = pattern or "*"
+    body_lines = [
+        "The NZTA deregistered VIN ingest executed successfully, but no FTP files matched the configured pattern.",
+        f"Remote path checked: {location}",
+        f"Pattern: {pattern_display}",
+    ]
     try:
         logging.debug("Sending no-files notification email")
         notifier.send(
             subject="NZTA VIN ingest ran with no files",
-            body=(
-                "The NZTA deregistered VIN ingest executed successfully, "
-                "but no FTP files matched the configured pattern."
-            ),
+            body="\n".join(body_lines),
             recipients=notifier.success_recipients,
         )
     except Exception:  # noqa: BLE001

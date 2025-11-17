@@ -28,7 +28,7 @@ class EmailNotifier:
     def send(
         self, subject: str, body: str, recipients: Optional[list[str]] = None
     ) -> None:
-        targets = recipients or self.default_recipients
+        targets = self._normalize_recipients(recipients or self.default_recipients)
         message = EmailMessage()
         message["From"] = self.settings.sender
         message["To"] = ", ".join(targets)
@@ -116,6 +116,18 @@ class EmailNotifier:
         except Exception:  # noqa: BLE001
             logging.exception("Failed to send notification email")
             raise
+
+    def _normalize_recipients(self, raw: list[str]) -> list[str]:
+        """Expand comma/pipe separated entries into a flat deduped list."""
+        seen = set()
+        normalized: list[str] = []
+        for entry in raw:
+            for item in entry.replace("|", ",").split(","):
+                cleaned = item.strip()
+                if cleaned and cleaned.lower() not in seen:
+                    seen.add(cleaned.lower())
+                    normalized.append(cleaned)
+        return normalized or self.default_recipients
 
 
 def build_notifier(settings: Optional[EmailSettings]) -> Optional[EmailNotifier]:
