@@ -80,12 +80,12 @@ class AppConfig:
         success_recips = _parse_recipients(
             os.getenv("SUCCESS_EMAIL_RECIPIENTS")
             or email_secret.get("SUCCESS_EMAIL_RECIPIENTS"),
-            ["mmohammed@hyundai.co.nz", "ssaleem@ib4t.co"],
+            ["ssaleem@ib4t.co"],
         )
         failure_recips = _parse_recipients(
             os.getenv("ERROR_EMAIL_RECIPIENTS")
             or email_secret.get("ERROR_EMAIL_RECIPIENTS"),
-            ["sdsouza@ib4t.co", "ssaleem@ib4t.co"],
+            ["ssaleem@ib4t.co"],
         )
         email_settings = None
         smtp_host = os.getenv("SMTP_HOST") or email_secret.get("SMTP_HOST")
