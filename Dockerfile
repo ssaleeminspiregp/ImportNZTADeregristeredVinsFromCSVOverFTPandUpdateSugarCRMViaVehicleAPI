@@ -14,5 +14,5 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy the application source after dependencies to avoid reinstalling.
 COPY app ./app
 
-# Launch the Flask app via gunicorn on the Cloud Run port.
-CMD ["gunicorn", "--bind", "0.0.0.0:8080", "app.main:app"]
+# Launch the Flask app via gunicorn on the Cloud Run port with longer timeout/workers to avoid premature kills.
+CMD ["gunicorn", "--bind", "0.0.0.0:8080", "--workers", "2", "--timeout", "180", "app.main:app"]
