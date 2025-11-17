@@ -179,7 +179,7 @@ def _parse_bool(value: Optional[str], fallback: bool) -> bool:
     return str(value).strip().lower() not in {"false", "0", "", "no", "none"}
 
 
-def _parse_timeout(value: Optional[str | int], fallback: int) -> int:
+def _parse_timeout(value: Optional[str | int], fallback: int = 30) -> int:
     try:
         parsed = int(value) if value is not None else int(fallback)
     except (TypeError, ValueError):
