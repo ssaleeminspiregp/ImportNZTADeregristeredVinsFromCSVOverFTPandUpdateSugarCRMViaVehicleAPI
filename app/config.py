@@ -111,7 +111,7 @@ class AppConfig:
                 use_tls=_parse_bool(
                     os.getenv("SMTP_USE_TLS"), email_secret.get("SMTP_USE_TLS", True)
                 ),
-                timeout=int(
+                timeout=_parse_timeout(
                     os.getenv("SMTP_TIMEOUT") or email_secret.get("SMTP_TIMEOUT", 30)
                 ),
                 debug=_parse_bool(
@@ -177,3 +177,11 @@ def _parse_bool(value: Optional[str], fallback: bool) -> bool:
     if value is None:
         return bool(fallback)
     return str(value).strip().lower() not in {"false", "0", "", "no", "none"}
+
+
+def _parse_timeout(value: Optional[str | int], fallback: int) -> int:
+    try:
+        parsed = int(value) if value is not None else int(fallback)
+    except (TypeError, ValueError):
+        parsed = int(fallback)
+    return max(5, min(parsed, 120))
