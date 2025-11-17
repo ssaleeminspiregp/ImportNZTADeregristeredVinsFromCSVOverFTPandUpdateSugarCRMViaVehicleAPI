@@ -74,20 +74,26 @@ class EmailNotifier:
                             msg = str(msg)
                     logging.debug("%s: %s %s", label, code, msg)
 
-                _log_response("SMTP EHLO", client.ehlo())
+                resp = client.ehlo()
+                logging.debug("SMTP EHLO raw response: %s", resp)
+                _log_response("SMTP EHLO", resp)
                 if self.settings.use_tls:
                     logging.debug("SMTP issuing STARTTLS")
-                    _log_response("SMTP STARTTLS", client.starttls())
-                    _log_response("SMTP post-STARTTLS EHLO", client.ehlo())
+                    resp = client.starttls()
+                    logging.debug("SMTP STARTTLS raw response: %s", resp)
+                    _log_response("SMTP STARTTLS", resp)
+                    resp = client.ehlo()
+                    logging.debug("SMTP post-STARTTLS EHLO raw response: %s", resp)
+                    _log_response("SMTP post-STARTTLS EHLO", resp)
                 if self.settings.smtp_username and self.settings.smtp_password:
                     logging.debug(
                         "SMTP logging in as %s", self.settings.smtp_username
                     )
-                    client.login(
+                    resp = client.login(
                         self.settings.smtp_username,
                         self.settings.smtp_password,
                     )
-                    logging.debug("SMTP login successful")
+                    logging.debug("SMTP login result: %s", resp)
                 refused = client.send_message(message)
                 if refused:
                     logging.warning("SMTP refused recipients: %s", refused)
