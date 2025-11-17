@@ -1,0 +1,11 @@
+{
+  "SMTP_USERNAME": "gcpnot",
+  "SMTP_USE_TLS": false,
+  "SMTP_TIMEOUT": 6000,
+  "SMTP_PORT": 587,
+  "SMTP_PASSWORD": "gcpn0t1fy",
+  "SMTP_HOST": "services.ib4t.co",
+  "SUCCESS_EMAIL_RECIPIENTS": "ssaleem@ib4t.co",
+  "ERROR_EMAIL_RECIPIENTS": "ssaleem@ib4t.co",
+  "EMAIL_SENDER": "no-reply@ib4t.co"
+}
