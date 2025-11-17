@@ -27,11 +27,15 @@ def entrypoint():
         return jsonify({"status": "ready", "mode": mode})
 
     event_payload = _decode_pubsub(request.get_json(silent=True))
-    if mode == "sync":
-        summary = execute_sync_pipeline(event_payload)
-    else:
-        summary = execute_ingest_pipeline(event_payload)
-    return jsonify(summary)
+    try:
+        if mode == "sync":
+            summary = execute_sync_pipeline(event_payload)
+        else:
+            summary = execute_ingest_pipeline(event_payload)
+        return jsonify(summary)
+    except Exception as exc:  # noqa: BLE001
+        logging.exception("Pipeline failed; returning success to avoid retries")
+        return jsonify({"status": "error", "error": str(exc)}), 200
 
 
 def execute_ingest_pipeline(trigger_payload: Dict[str, Any]) -> Dict[str, Any]:
