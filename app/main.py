@@ -99,6 +99,10 @@ def execute_ingest_pipeline(trigger_payload: Dict[str, Any]) -> Dict[str, Any]:
                     ftp=ftp,
                 )
                 processed_reports.append(report)
+            except HeaderValidationError:
+                # Already handled inside _ingest_single_file; avoid duplicate summary email.
+                logging.info("Header validation failed for %s; skipping aggregated summary", filename)
+                continue
             except Exception as exc:  # noqa: BLE001
                 logging.exception("Failed to process file %s", filename)
                 error_summary = {
@@ -121,7 +125,7 @@ def execute_ingest_pipeline(trigger_payload: Dict[str, Any]) -> Dict[str, Any]:
                     remote_path=config.ftp_remote_path,
                     pattern=config.ftp_file_pattern,
                 )
-        else:
+        elif processed_reports:
             _notify_ingest_summary(notifier, processed_reports)
     finally:
         for path in temp_dir.glob("*"):
@@ -320,10 +324,17 @@ def _handle_header_error(
     if not notifier:
         logging.error("Unable to send notification email; SMTP settings not configured")
         return
+    recipients = list(
+        {
+            *notifier.failure_recipients,
+            *notifier.success_recipients,
+        }
+    )
     try:
         notifier.send(
             subject="NZTA Deregistered VIN ingest failed - header validation",
             body=message,
+            recipients=recipients,
         )
     except Exception:  # noqa: BLE001
         logging.exception("Failed to send header validation alert email")
