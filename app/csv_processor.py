@@ -38,52 +38,56 @@ class CsvProcessor:
     def __init__(self, allowed_makes: Iterable[str]) -> None:
         self.allowed_makes = {item.upper() for item in allowed_makes}
 
-    def load(self, source: Path) -> Iterator[VehicleRecord]:
+    def load(self, source: Path) -> list[VehicleRecord]:
+        records: list[VehicleRecord] = []
         with open(source, newline="", encoding="utf-8") as handle:
             reader = csv.DictReader(handle)
             self._validate_headers(reader.fieldnames)
-        for idx, row in enumerate(reader, start=1):
-            make = self._clean_value(row.get("VEHICLE_MAKE")).upper()
-            if make not in self.allowed_makes:
-                logging.debug(
-                    "Row %s skipped: make '%s' not allowed; allowed=%s",
-                    idx,
-                    make,
-                    sorted(self.allowed_makes),
-                )
-                continue
+            for idx, row in enumerate(reader, start=1):
+                make = self._clean_value(row.get("VEHICLE_MAKE")).upper()
+                if make not in self.allowed_makes:
+                    logging.debug(
+                        "Row %s skipped: make '%s' not allowed; allowed=%s",
+                        idx,
+                        make,
+                        sorted(self.allowed_makes),
+                    )
+                    continue
 
-            vin = self._clean_value(row.get("VIN")).upper()
-            if not vin:
-                logging.debug(
-                    "Row %s skipped: missing VIN (make=%s, model=%s)",
-                    idx,
-                    make,
-                    self._clean_value(row.get("VEHICLE_MODEL")),
-                )
-                continue
+                vin = self._clean_value(row.get("VIN")).upper()
+                if not vin:
+                    logging.debug(
+                        "Row %s skipped: missing VIN (make=%s, model=%s)",
+                        idx,
+                        make,
+                        self._clean_value(row.get("VEHICLE_MODEL")),
+                    )
+                    continue
 
-            model = self._clean_value(row.get("VEHICLE_MODEL"))
-            rego = self._clean_value(row.get("REGNO")).upper()
-            dereg_raw = self._clean_value(row.get("DEREG_DATE"))
-            dereg = self._format_date(dereg_raw)
-            logging.debug(
-                "Row %s accepted: VIN=%s make=%s model=%s rego=%s dereg_raw=%s dereg_norm=%s",
-                idx,
-                vin,
-                make,
-                model,
-                rego,
-                dereg_raw,
-                dereg,
-            )
-            yield VehicleRecord(
-                make=make,
-                model=model,
-                vin=vin,
-                dereg_date=dereg,
-                rego=rego,
-            )
+                model = self._clean_value(row.get("VEHICLE_MODEL"))
+                rego = self._clean_value(row.get("REGNO")).upper()
+                dereg_raw = self._clean_value(row.get("DEREG_DATE"))
+                dereg = self._format_date(dereg_raw)
+                logging.debug(
+                    "Row %s accepted: VIN=%s make=%s model=%s rego=%s dereg_raw=%s dereg_norm=%s",
+                    idx,
+                    vin,
+                    make,
+                    model,
+                    rego,
+                    dereg_raw,
+                    dereg,
+                )
+                records.append(
+                    VehicleRecord(
+                        make=make,
+                        model=model,
+                        vin=vin,
+                        dereg_date=dereg,
+                        rego=rego,
+                    )
+                )
+        return records
 
     @staticmethod
     def _format_date(raw: str | None) -> str:
