@@ -42,24 +42,48 @@ class CsvProcessor:
         with open(source, newline="", encoding="utf-8") as handle:
             reader = csv.DictReader(handle)
             self._validate_headers(reader.fieldnames)
-            for row in reader:
-                make = self._clean_value(row.get("VEHICLE_MAKE")).upper()
-                if make not in self.allowed_makes:
-                    continue
-
-                vin = self._clean_value(row.get("VIN")).upper()
-                if not vin:
-                    logging.warning("Skipping record without VIN for make %s", make)
-                    continue
-
-                dereg = self._format_date(self._clean_value(row.get("DEREG_DATE")))
-                yield VehicleRecord(
-                    make=make,
-                    model=self._clean_value(row.get("VEHICLE_MODEL")),
-                    vin=vin,
-                    dereg_date=dereg,
-                    rego=self._clean_value(row.get("REGNO")).upper(),
+        for idx, row in enumerate(reader, start=1):
+            make = self._clean_value(row.get("VEHICLE_MAKE")).upper()
+            if make not in self.allowed_makes:
+                logging.debug(
+                    "Row %s skipped: make '%s' not allowed; allowed=%s",
+                    idx,
+                    make,
+                    sorted(self.allowed_makes),
                 )
+                continue
+
+            vin = self._clean_value(row.get("VIN")).upper()
+            if not vin:
+                logging.debug(
+                    "Row %s skipped: missing VIN (make=%s, model=%s)",
+                    idx,
+                    make,
+                    self._clean_value(row.get("VEHICLE_MODEL")),
+                )
+                continue
+
+            model = self._clean_value(row.get("VEHICLE_MODEL"))
+            rego = self._clean_value(row.get("REGNO")).upper()
+            dereg_raw = self._clean_value(row.get("DEREG_DATE"))
+            dereg = self._format_date(dereg_raw)
+            logging.debug(
+                "Row %s accepted: VIN=%s make=%s model=%s rego=%s dereg_raw=%s dereg_norm=%s",
+                idx,
+                vin,
+                make,
+                model,
+                rego,
+                dereg_raw,
+                dereg,
+            )
+            yield VehicleRecord(
+                make=make,
+                model=model,
+                vin=vin,
+                dereg_date=dereg,
+                rego=rego,
+            )
 
     @staticmethod
     def _format_date(raw: str | None) -> str:
