@@ -173,6 +173,7 @@ def execute_sync_pipeline(trigger_payload: Dict[str, Any]) -> Dict[str, Any]:
         return summary
 
     successes = 0
+    success_files: set[str] = set()
     failures: List[Dict[str, str]] = []
     for entry in entries:
         record = entry.record
@@ -192,6 +193,8 @@ def execute_sync_pipeline(trigger_payload: Dict[str, Any]) -> Dict[str, Any]:
             sugar.update_vehicle(vehicle_id, record)
             stage_repo.mark_pushed(entry.stage_id)
             successes += 1
+            if entry.source_filename:
+                success_files.add(entry.source_filename)
         except Exception as exc:  # noqa: BLE001
             logging.exception("Failed to sync VIN %s", record.vin)
             stage_repo.record_error(entry.stage_id, str(exc))
@@ -212,6 +215,7 @@ def execute_sync_pipeline(trigger_payload: Dict[str, Any]) -> Dict[str, Any]:
         )
         if failures
         else [],
+        "success_file_names": sorted(success_files),
         "status": "success" if not failures else "partial",
         "trigger_payload": trigger_payload,
     }
@@ -386,7 +390,12 @@ def _notify_sync_summary(
         f"Failed updates: {summary.get('failed_updates')}",
     ]
     if has_failures:
-        lines.append(f"Affected files: {', '.join(summary.get('file_names') or []) or 'unknown'}")
+        lines.append(
+            f"Successful files: {', '.join(summary.get('success_file_names') or []) or 'none'}"
+        )
+        lines.append(
+            f"Affected (failed) files: {', '.join(summary.get('file_names') or []) or 'unknown'}"
+        )
         lines.append("")
         lines.append("Failed VINs:")
         for item in failures:
