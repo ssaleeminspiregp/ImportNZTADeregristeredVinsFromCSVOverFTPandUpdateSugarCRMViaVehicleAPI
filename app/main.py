@@ -3,6 +3,8 @@ import json
 import logging
 import os
 import tempfile
+import threading
+import time
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -18,6 +20,8 @@ from app.sugar_client import SugarCrmClient
 
 logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"))
 app = Flask(__name__)
+_last_no_file_notice: float = 0.0
+_no_file_cooldown = int(os.getenv("NO_FILE_NOTIFY_COOLDOWN_SEC", "600"))
 
 
 @app.route("/", methods=["GET", "POST"])
@@ -27,15 +31,20 @@ def entrypoint():
         return jsonify({"status": "ready", "mode": mode})
 
     event_payload = _decode_pubsub(request.get_json(silent=True))
+    threading.Thread(
+        target=_run_pipeline, args=(mode, event_payload), daemon=True
+    ).start()
+    return jsonify({"status": "accepted", "mode": mode})
+
+
+def _run_pipeline(mode: str, payload: Dict[str, Any]) -> None:
     try:
         if mode == "sync":
-            summary = execute_sync_pipeline(event_payload)
+            execute_sync_pipeline(payload)
         else:
-            summary = execute_ingest_pipeline(event_payload)
-        return jsonify(summary)
-    except Exception as exc:  # noqa: BLE001
-        logging.exception("Pipeline failed; returning success to avoid retries")
-        return jsonify({"status": "error", "error": str(exc)}), 200
+            execute_ingest_pipeline(payload)
+    except Exception:  # noqa: BLE001
+        logging.exception("Pipeline failed in background execution")
 
 
 def execute_ingest_pipeline(trigger_payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -101,11 +110,17 @@ def execute_ingest_pipeline(trigger_payload: Dict[str, Any]) -> Dict[str, Any]:
                 }
                 processed_reports.append(error_summary)
         if not found_file:
-            _notify_no_files(
-                notifier,
-                remote_path=config.ftp_remote_path,
-                pattern=config.ftp_file_pattern,
-            )
+            if _should_skip_no_file_notice():
+                logging.info(
+                    "Skipping no-files notification (sent within last %ss)",
+                    _no_file_cooldown,
+                )
+            else:
+                _notify_no_files(
+                    notifier,
+                    remote_path=config.ftp_remote_path,
+                    pattern=config.ftp_file_pattern,
+                )
         else:
             _notify_ingest_summary(notifier, processed_reports)
     finally:
@@ -418,3 +433,13 @@ def _notify_no_files(
         )
     except Exception:  # noqa: BLE001
         logging.exception("Failed to send no-files notification email")
+
+
+def _should_skip_no_file_notice() -> bool:
+    """Throttle repeated no-file notifications within the cooldown window."""
+    global _last_no_file_notice
+    now = time.time()
+    if _last_no_file_notice and now - _last_no_file_notice < _no_file_cooldown:
+        return True
+    _last_no_file_notice = now
+    return False

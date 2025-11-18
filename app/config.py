@@ -58,7 +58,7 @@ class AppConfig:
     bq_dataset: str
     bq_table: str
     bq_location: str
-    ftp_timeout: int = 30
+    ftp_timeout: int = 20
     ftp_block_size: int = 32768
     sugar_timeout: int = 30
     email: EmailSettings | None = None
