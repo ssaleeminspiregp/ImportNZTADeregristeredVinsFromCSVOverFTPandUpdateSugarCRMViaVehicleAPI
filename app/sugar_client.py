@@ -1,10 +1,12 @@
 import json
 import logging
+import time
 from datetime import date, datetime
 from typing import Optional
 from urllib.parse import urljoin
 
 import requests
+from requests import exceptions as req_exc
 
 from app.csv_processor import VehicleRecord
 
@@ -113,18 +115,36 @@ class SugarCrmClient:
         headers.update(self._auth_headers())
         kwargs["headers"] = headers
 
-        self._log_request(method, url, kwargs)
-        response = self.session.request(method=method, url=url, **kwargs)
-        self._log_response(method, url, response)
-        if response.status_code == 401:
-            logging.warning("SugarCRM request unauthorized; refreshing token and retrying")
-            self.authenticate()
-            headers.update(self._auth_headers())
-            kwargs["headers"] = headers
-            self._log_request(method, url, kwargs, retry=True)
-            response = self.session.request(method=method, url=url, **kwargs)
-            self._log_response(method, url, response, retry=True)
-        return response
+        attempts = 3
+        backoff = 2
+        for attempt in range(1, attempts + 1):
+            try:
+                self._log_request(method, url, kwargs)
+                response = self.session.request(method=method, url=url, **kwargs)
+                self._log_response(method, url, response)
+                if response.status_code == 401:
+                    logging.warning("SugarCRM request unauthorized; refreshing token and retrying")
+                    self.authenticate()
+                    headers.update(self._auth_headers())
+                    kwargs["headers"] = headers
+                    self._log_request(method, url, kwargs, retry=True)
+                    response = self.session.request(method=method, url=url, **kwargs)
+                    self._log_response(method, url, response, retry=True)
+                return response
+            except (req_exc.ConnectionError, req_exc.ReadTimeout) as exc:
+                if attempt == attempts:
+                    raise
+                logging.warning(
+                    "SugarCRM %s %s connection issue (%s/%s); retrying in %ss: %s",
+                    method.upper(),
+                    url,
+                    attempt,
+                    attempts,
+                    backoff,
+                    exc,
+                )
+                time.sleep(backoff)
+                backoff *= 2
 
     def _log_request(
         self, method: str, url: str, kwargs: dict, retry: bool = False
