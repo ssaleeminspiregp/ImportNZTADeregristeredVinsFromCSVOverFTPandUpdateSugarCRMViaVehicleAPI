@@ -43,22 +43,22 @@ class CsvProcessor:
             reader = csv.DictReader(handle)
             self._validate_headers(reader.fieldnames)
             for row in reader:
-                make = (row.get("VEHICLE_MAKE") or "").strip().upper()
+                make = self._clean_value(row.get("VEHICLE_MAKE")).upper()
                 if make not in self.allowed_makes:
                     continue
 
-                vin = (row.get("VIN") or "").strip().upper()
+                vin = self._clean_value(row.get("VIN")).upper()
                 if not vin:
                     logging.warning("Skipping record without VIN for make %s", make)
                     continue
 
-                dereg = self._format_date(row.get("DEREG_DATE"))
+                dereg = self._format_date(self._clean_value(row.get("DEREG_DATE")))
                 yield VehicleRecord(
                     make=make,
-                    model=(row.get("VEHICLE_MODEL") or "").strip(),
+                    model=self._clean_value(row.get("VEHICLE_MODEL")),
                     vin=vin,
                     dereg_date=dereg,
-                    rego=(row.get("REGNO") or "").strip().upper(),
+                    rego=self._clean_value(row.get("REGNO")).upper(),
                 )
 
     @staticmethod
@@ -76,5 +76,18 @@ class CsvProcessor:
 
     @staticmethod
     def _validate_headers(headers: list[str] | None) -> None:
-        if headers is None or list(headers) != EXPECTED_HEADERS:
+        if headers is None:
             raise HeaderValidationError(headers)
+        cleaned = []
+        for idx, h in enumerate(headers):
+            if idx == 0 and h.startswith("\ufeff"):
+                h = h.replace("\ufeff", "", 1)
+            cleaned.append(h.strip())
+        if cleaned != EXPECTED_HEADERS:
+            raise HeaderValidationError(cleaned)
+
+    @staticmethod
+    def _clean_value(value: str | None) -> str:
+        if value is None:
+            return ""
+        return value.replace("\ufeff", "", 1).strip()
