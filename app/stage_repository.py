@@ -154,8 +154,9 @@ class StageRepository:
                 query_parameters=[
                     bigquery.ScalarQueryParameter("status", "STRING", status),
                     bigquery.ScalarQueryParameter("min_age", "INT64", min_age_minutes),
-                ]
+                ],
             ),
+            location=self.location,
         )
         records: list[StagedEntry] = []
         for row in job.result():
@@ -210,8 +211,8 @@ class StageRepository:
                     query,
                     job_config=bigquery.QueryJobConfig(
                         query_parameters=parameters,
-                        location=self.location,
                     ),
+                    location=self.location,
                 ).result()
                 return True
             except BadRequest as exc:
