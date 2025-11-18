@@ -19,8 +19,8 @@ class StagedEntry:
 
 
 class StageRepository:
-    STREAMING_BUFFER_RETRIES = 5
-    STREAMING_BUFFER_DELAY_SECONDS = 5
+    STREAMING_BUFFER_RETRIES = 12
+    STREAMING_BUFFER_DELAY_SECONDS = 15
 
     def __init__(
         self,
@@ -32,7 +32,7 @@ class StageRepository:
         self.dataset = dataset
         self.table = table
         self.location = location
-        self.client = client or bigquery.Client()
+        self.client = client or bigquery.Client(location=location)
         self.project = self.client.project
         self._table_id = f"{self.project}.{self.dataset}.{self.table}"
 
@@ -208,7 +208,10 @@ class StageRepository:
             try:
                 self.client.query(
                     query,
-                    job_config=bigquery.QueryJobConfig(query_parameters=parameters),
+                    job_config=bigquery.QueryJobConfig(
+                        query_parameters=parameters,
+                        location=self.location,
+                    ),
                 ).result()
                 return True
             except BadRequest as exc:
