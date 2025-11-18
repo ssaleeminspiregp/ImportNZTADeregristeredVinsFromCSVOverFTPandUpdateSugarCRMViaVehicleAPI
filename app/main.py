@@ -311,15 +311,19 @@ def _handle_header_error(
     notifier: EmailNotifier | None, source_path: Path, error: HeaderValidationError
 ) -> None:
     file_name = source_path.name
-    message = (
-        "NZTA deregistered VIN ingestion failed due to an invalid CSV header.\n\n"
-        f"File path: {source_path}\n"
-        f"File name: {file_name}\n"
-        "The header must have all columns in this exact order:\n"
-        f"{', '.join(EXPECTED_HEADERS)}\n"
-        "The file contained:\n"
-        f"{', '.join(error.actual) if error.actual else 'None'}\n"
-    )
+    lines = [
+        "NZTA deregistered VIN ingestion failed due to an invalid CSV header.",
+        "",
+        f"File path: {source_path}",
+        f"File name: {file_name}",
+        "",
+        "The header must have all columns in this exact order:",
+        ", ".join(EXPECTED_HEADERS),
+        "",
+        "The file contained:",
+        ", ".join(error.actual) if error.actual else "None",
+    ]
+    message = "\n".join(lines)
     logging.error(message)
     if not notifier:
         logging.error("Unable to send notification email; SMTP settings not configured")
