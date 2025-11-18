@@ -17,7 +17,7 @@ substitutions:
   # Scheduler jobs + cron specs (NZT).
   _INGEST_JOB: all-brands-nzta-deregistered-vins-ingest-daily
   _SYNC_JOB: all-brands-nzta-deregistered-vins-sync-daily
-  _INGEST_SCHEDULE: "0 5 * * *"
+  _INGEST_SCHEDULE: "0 4 * * *"
   _SYNC_SCHEDULE: "0 6 * * *"
 
 logsBucket: gs://ib4t-integration-adh-data-utopia-cloudbuild-logs
@@ -117,6 +117,8 @@ steps:
         "--platform","managed",
         "--allow-unauthenticated",
         "--timeout","900",
+        "--cpu","2",
+        "--memory","1Gi",
         "--max-instances","1",
         "--min-instances","1",
         "--service-account","ib4t-integration@adh-data-utopia.iam.gserviceaccount.com",
@@ -135,6 +137,8 @@ steps:
         "--platform","managed",
         "--allow-unauthenticated",
         "--timeout","900",
+        "--cpu","2",
+        "--memory","1Gi",
         "--max-instances","1",
         "--min-instances","1",
         "--service-account","ib4t-integration@adh-data-utopia.iam.gserviceaccount.com",
