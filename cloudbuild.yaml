@@ -172,7 +172,7 @@ steps:
           --push-endpoint="$${SERVICE_URL}/" \
           --push-auth-service-account="ib4t-integration@adh-data-utopia.iam.gserviceaccount.com" \
           --dead-letter-topic="$_DLQ_TOPIC" \
-          --max-delivery-attempts="1" \
+          --max-delivery-attempts="5" \
           --min-retry-delay="0s" \
           --max-retry-delay="0s"
 
@@ -192,7 +192,7 @@ steps:
           --push-endpoint="$${SERVICE_URL}/" \
           --push-auth-service-account="ib4t-integration@adh-data-utopia.iam.gserviceaccount.com" \
           --dead-letter-topic="$_DLQ_TOPIC" \
-          --max-delivery-attempts="1" \
+          --max-delivery-attempts="5" \
           --min-retry-delay="0s" \
           --max-retry-delay="0s"
 
