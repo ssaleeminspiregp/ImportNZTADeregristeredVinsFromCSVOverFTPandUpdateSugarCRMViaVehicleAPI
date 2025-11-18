@@ -40,7 +40,7 @@ class CsvProcessor:
 
     def load(self, source: Path) -> list[VehicleRecord]:
         records: list[VehicleRecord] = []
-        with open(source, newline="", encoding="utf-8") as handle:
+        with open(source, newline="", encoding="utf-8-sig") as handle:
             reader = csv.DictReader(handle)
             self._validate_headers(reader.fieldnames)
             for idx, row in enumerate(reader, start=1):
