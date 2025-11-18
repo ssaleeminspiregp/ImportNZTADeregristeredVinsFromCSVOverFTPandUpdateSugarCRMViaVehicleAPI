@@ -13,6 +13,7 @@ substitutions:
   _SYNC_TOPIC: all-brands-nzta-deregistered-vins-sync-trigger
   _INGEST_SUB: all-brands-nzta-deregistered-vins-ingest-runner
   _SYNC_SUB: all-brands-nzta-deregistered-vins-sync-runner
+  _DLQ_TOPIC: all-brands-nzta-deregistered-vins-dlq
   # Scheduler jobs + cron specs (NZT).
   _INGEST_JOB: all-brands-nzta-deregistered-vins-ingest-daily
   _SYNC_JOB: all-brands-nzta-deregistered-vins-sync-daily
@@ -71,6 +72,21 @@ steps:
           gcloud pubsub topics describe "$topic" >/dev/null 2>&1 || \
           gcloud pubsub topics create "$topic"
         done
+
+  # 4) Guarantee the DLQ topic exists and Pub/Sub SA can publish to it.
+  - name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        set -euo pipefail
+        gcloud pubsub topics describe "$_DLQ_TOPIC" >/dev/null 2>&1 || \
+        gcloud pubsub topics create "$_DLQ_TOPIC"
+        PROJECT_NUMBER="$(gcloud projects describe "$(gcloud config get-value project)" --format='value(projectNumber)')"
+        gcloud pubsub topics add-iam-policy-binding "$_DLQ_TOPIC" \
+          --member="serviceAccount:service-$${PROJECT_NUMBER}@gcp-sa-pubsub.iam.gserviceaccount.com" \
+          --role="roles/pubsub.publisher" \
+          --quiet
 
   # 4) Build the Cloud Run container image from the current workspace.
   - name: gcr.io/cloud-builders/docker
@@ -154,7 +170,11 @@ steps:
         gcloud pubsub subscriptions create "$_INGEST_SUB" \
           --topic="$_INGEST_TOPIC" \
           --push-endpoint="$${SERVICE_URL}/" \
-          --push-auth-service-account="ib4t-integration@adh-data-utopia.iam.gserviceaccount.com"
+          --push-auth-service-account="ib4t-integration@adh-data-utopia.iam.gserviceaccount.com" \
+          --dead-letter-topic="$_DLQ_TOPIC" \
+          --max-delivery-attempts="1" \
+          --min-retry-delay="0s" \
+          --max-retry-delay="0s"
 
   # 10) Recreate the push subscription pointing to the sync service URL.
   - name: gcr.io/google.com/cloudsdktool/cloud-sdk
@@ -170,7 +190,11 @@ steps:
         gcloud pubsub subscriptions create "$_SYNC_SUB" \
           --topic="$_SYNC_TOPIC" \
           --push-endpoint="$${SERVICE_URL}/" \
-          --push-auth-service-account="ib4t-integration@adh-data-utopia.iam.gserviceaccount.com"
+          --push-auth-service-account="ib4t-integration@adh-data-utopia.iam.gserviceaccount.com" \
+          --dead-letter-topic="$_DLQ_TOPIC" \
+          --max-delivery-attempts="1" \
+          --min-retry-delay="0s" \
+          --max-retry-delay="0s"
 
   # 11) Create or update the Scheduler jobs that publish daily triggers.
   - name: gcr.io/google.com/cloudsdktool/cloud-sdk
