@@ -76,25 +76,33 @@ steps:
         TABLE="${_BQ_STAGE_TABLE:-dl_all_brands_deregistered_vins_stage}"
         LOCATION="${_BQ_STAGE_LOCATION:-australia-southeast1}"
 
-        ds_loc="$(bq show --format="value(location)" "$$DATASET" 2>/dev/null || true)"
-        if [ -z "$$ds_loc" ]; then
+        echo "--- Checking Dataset: $$DATASET ---"
+        if ! bq show --format="value(location)" "$$DATASET" >/dev/null 2>&1; then
+          echo "Dataset not found (or permission denied). Attempting to create..."
           bq --location="$$LOCATION" mk --dataset "$$DATASET"
-        elif [ "$$ds_loc" != "$$LOCATION" ]; then
-          echo "Dataset $$DATASET exists in $$ds_loc; expected $$LOCATION" >&2
-          exit 1
+        else
+          ds_loc="$(bq show --format="value(location)" "$$DATASET")"
+          if [ "$$ds_loc" != "$$LOCATION" ]; then
+            echo "ERROR: Dataset $$DATASET exists in location '$$ds_loc' but build requires '$$LOCATION'."
+            echo "Please delete the dataset or change the build region."
+            exit 1
+          fi
+          echo "Dataset exists in correct location: $$ds_loc"
         fi
 
-        tbl_loc="$(bq show --format="value(location)" "$$DATASET.$$TABLE" 2>/dev/null || true)"
-        if [ -z "$$tbl_loc" ]; then
-          bq --location="$$LOCATION" mk \
-            --table "$$DATASET.$$TABLE" \
-            --schema "id:STRING:REQUIRED,vin:STRING,vehicle_make:STRING,vehicle_model:STRING,dereg_date:DATE,reg_plate:STRING,status:STRING,date_created:TIMESTAMP,date_modified:TIMESTAMP,source_filename:STRING,error_message:STRING" \
-            --time_partitioning_type=DAY \
-            --time_partitioning_field=dereg_date \
-            --clustering_fields=vin
-        elif [ "$$tbl_loc" != "$$LOCATION" ]; then
-          echo "Table $$DATASET.$$TABLE exists in $$tbl_loc; expected $$LOCATION" >&2
-          exit 1
+        echo "--- Checking Table: $$DATASET.$$TABLE ---"
+        if ! bq show --format="value(location)" "$$DATASET.$$TABLE" >/dev/null 2>&1; then
+          echo "Table not found. Creating..."
+          bq --location="$$LOCATION" --table --time_partitioning_type=DAY --time_partitioning_field=dereg_date --clustering_fields=vin \
+            mk "$$DATASET.$$TABLE" \
+            --schema "id:STRING:REQUIRED,vin:STRING,vehicle_make:STRING,vehicle_model:STRING,dereg_date:DATE,reg_plate:STRING,status:STRING,date_created:TIMESTAMP,date_modified:TIMESTAMP,source_filename:STRING,error_message:STRING"
+        else
+          tbl_loc="$(bq show --format="value(location)" "$$DATASET.$$TABLE")"
+          if [ "$$tbl_loc" != "$$LOCATION" ]; then
+            echo "ERROR: Table $$DATASET.$$TABLE exists in location '$$tbl_loc' but build requires '$$LOCATION'."
+            exit 1
+          fi
+          echo "Table exists in correct location."
         fi
 
   # 4) Guarantee the Pub/Sub topics exist.
