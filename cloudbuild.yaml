@@ -76,7 +76,7 @@ steps:
         TABLE="${_BQ_STAGE_TABLE:-dl_all_brands_deregistered_vins_stage}"
         LOCATION="${_BQ_STAGE_LOCATION:-australia-southeast1}"
 
-        ds_loc="$(bq show --format=value(location) "$$DATASET" 2>/dev/null || true)"
+        ds_loc="$(bq show --format="value(location)" "$$DATASET" 2>/dev/null || true)"
         if [ -z "$$ds_loc" ]; then
           bq --location="$$LOCATION" mk --dataset "$$DATASET"
         elif [ "$$ds_loc" != "$$LOCATION" ]; then
@@ -84,7 +84,7 @@ steps:
           exit 1
         fi
 
-        tbl_loc="$(bq show --format=value(location) "$$DATASET.$$TABLE" 2>/dev/null || true)"
+        tbl_loc="$(bq show --format="value(location)" "$$DATASET.$$TABLE" 2>/dev/null || true)"
         if [ -z "$$tbl_loc" ]; then
           bq --location="$$LOCATION" mk \
             --table "$$DATASET.$$TABLE" \
