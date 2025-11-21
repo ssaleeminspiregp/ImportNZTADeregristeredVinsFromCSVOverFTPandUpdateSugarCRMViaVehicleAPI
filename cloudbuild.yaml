@@ -76,29 +76,29 @@ steps:
         TABLE="${_BQ_STAGE_TABLE:-dl_all_brands_deregistered_vins_stage}"
         LOCATION="${_BQ_STAGE_LOCATION:-australia-southeast1}"
 
-        ds_json="$(bq show --format=prettyjson "$DATASET" 2>/dev/null || true)"
-        if [ -z "$ds_json" ]; then
-          bq --location="$LOCATION" mk --dataset "$DATASET"
+        ds_json="$(bq show --format=prettyjson "$$DATASET" 2>/dev/null || true)"
+        if [ -z "$$ds_json" ]; then
+          bq --location="$$LOCATION" mk --dataset "$$DATASET"
         else
-          ds_loc="$(printf '%s' "$ds_json" | python -c "import json,sys;print(json.load(sys.stdin).get('location',''))")"
-          if [ -n "$ds_loc" ] && [ "$ds_loc" != "$LOCATION" ]; then
-            echo "Dataset $DATASET exists in $ds_loc; expected $LOCATION" >&2
+          ds_loc="$(printf '%s' "$$ds_json" | python -c "import json,sys;print(json.load(sys.stdin).get('location',''))")"
+          if [ -n "$$ds_loc" ] && [ "$$ds_loc" != "$$LOCATION" ]; then
+            echo "Dataset $$DATASET exists in $$ds_loc; expected $$LOCATION" >&2
             exit 1
           fi
         fi
 
-        tbl_json="$(bq show --format=prettyjson "$DATASET.$TABLE" 2>/dev/null || true)"
-        if [ -z "$tbl_json" ]; then
-          bq --location="$LOCATION" mk \
-            --table "$DATASET.$TABLE" \
+        tbl_json="$(bq show --format=prettyjson "$$DATASET.$$TABLE" 2>/dev/null || true)"
+        if [ -z "$$tbl_json" ]; then
+          bq --location="$$LOCATION" mk \
+            --table "$$DATASET.$$TABLE" \
             --schema "id:STRING:REQUIRED,vin:STRING,vehicle_make:STRING,vehicle_model:STRING,dereg_date:DATE,reg_plate:STRING,status:STRING,date_created:TIMESTAMP,date_modified:TIMESTAMP,source_filename:STRING,error_message:STRING" \
             --time_partitioning_type=DAY \
             --time_partitioning_field=dereg_date \
             --clustering_fields=vin
         else
-          tbl_loc="$(printf '%s' "$tbl_json" | python -c "import json,sys;print(json.load(sys.stdin).get('location',''))")"
-          if [ -n "$tbl_loc" ] && [ "$tbl_loc" != "$LOCATION" ]; then
-            echo "Table $DATASET.$TABLE exists in $tbl_loc; expected $LOCATION" >&2
+          tbl_loc="$(printf '%s' "$$tbl_json" | python -c "import json,sys;print(json.load(sys.stdin).get('location',''))")"
+          if [ -n "$$tbl_loc" ] && [ "$$tbl_loc" != "$$LOCATION" ]; then
+            echo "Table $$DATASET.$$TABLE exists in $$tbl_loc; expected $$LOCATION" >&2
             exit 1
           fi
         fi
