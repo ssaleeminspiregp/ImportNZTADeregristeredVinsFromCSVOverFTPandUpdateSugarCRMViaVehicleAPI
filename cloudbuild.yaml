@@ -80,12 +80,7 @@ steps:
         if [ -z "$ds_json" ]; then
           bq --location="$LOCATION" mk --dataset "$DATASET"
         else
-          ds_loc="$(DS_JSON="$ds_json" python - <<'PY'
-import json, os
-data = json.loads(os.environ["DS_JSON"])
-print(data.get("location", ""))
-PY
-)"
+          ds_loc="$(printf '%s' "$ds_json" | python -c "import json,sys;print(json.load(sys.stdin).get('location',''))")"
           if [ -n "$ds_loc" ] && [ "$ds_loc" != "$LOCATION" ]; then
             echo "Dataset $DATASET exists in $ds_loc; expected $LOCATION" >&2
             exit 1
@@ -101,12 +96,7 @@ PY
             --time_partitioning_field=dereg_date \
             --clustering_fields=vin
         else
-          tbl_loc="$(TBL_JSON="$tbl_json" python - <<'PY'
-import json, os
-data = json.loads(os.environ["TBL_JSON"])
-print(data.get("location", ""))
-PY
-)"
+          tbl_loc="$(printf '%s' "$tbl_json" | python -c "import json,sys;print(json.load(sys.stdin).get('location',''))")"
           if [ -n "$tbl_loc" ] && [ "$tbl_loc" != "$LOCATION" ]; then
             echo "Table $DATASET.$TABLE exists in $tbl_loc; expected $LOCATION" >&2
             exit 1
