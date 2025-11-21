@@ -29,6 +29,8 @@ logsBucket: gs://ib4t-integration-adh-data-utopia-cloudbuild-logs
 options:
   logging: GCS_ONLY
 
+serviceAccount: ib4t-integration@adh-data-utopia.iam.gserviceaccount.com
+
 steps:
   # 0) Enable required APIs (idempotent if already enabled).
   - name: gcr.io/google.com/cloudsdktool/cloud-sdk
