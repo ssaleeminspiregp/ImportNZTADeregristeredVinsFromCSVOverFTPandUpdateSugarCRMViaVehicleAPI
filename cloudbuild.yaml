@@ -93,9 +93,13 @@ steps:
         echo "--- Checking Table: $$DATASET.$$TABLE ---"
         if ! bq show --format="value(location)" "$$DATASET.$$TABLE" >/dev/null 2>&1; then
           echo "Table not found. Creating..."
-          bq --location="$$LOCATION" --table --time_partitioning_type=DAY --time_partitioning_field=dereg_date --clustering_fields=vin \
-            mk "$$DATASET.$$TABLE" \
-            --schema "id:STRING:REQUIRED,vin:STRING,vehicle_make:STRING,vehicle_model:STRING,dereg_date:DATE,reg_plate:STRING,status:STRING,date_created:TIMESTAMP,date_modified:TIMESTAMP,source_filename:STRING,error_message:STRING"
+          bq --location="$$LOCATION" mk \
+            --table \
+            --time_partitioning_type=DAY \
+            --time_partitioning_field=dereg_date \
+            --clustering_fields=vin \
+            --schema "id:STRING:REQUIRED,vin:STRING,vehicle_make:STRING,vehicle_model:STRING,dereg_date:DATE,reg_plate:STRING,status:STRING,date_created:TIMESTAMP,date_modified:TIMESTAMP,source_filename:STRING,error_message:STRING" \
+            "$$DATASET.$$TABLE"
         else
           tbl_loc="$(bq show --format="value(location)" "$$DATASET.$$TABLE")"
           if [ "$$tbl_loc" != "$$LOCATION" ]; then
