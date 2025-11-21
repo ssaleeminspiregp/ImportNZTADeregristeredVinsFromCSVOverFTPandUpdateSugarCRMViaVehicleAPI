@@ -74,7 +74,7 @@ steps:
       - -c
       - |
         set -euo pipefail
-        DATASET="${_BQ_STAGE_DATASET:-dl_nzta}"
+        DATASET="${_BQ_STAGE_DATASET:-ds_nzta}"
         TABLE="${_BQ_STAGE_TABLE:-dl_all_brands_deregistered_vins_stage}"
         LOCATION="${_BQ_STAGE_LOCATION:-australia-southeast1}"
 
@@ -100,7 +100,7 @@ steps:
             --time_partitioning_type=DAY \
             --time_partitioning_field=dereg_date \
             --clustering_fields=vin \
-            --schema "id:STRING:REQUIRED,vin:STRING,vehicle_make:STRING,vehicle_model:STRING,dereg_date:DATE,reg_plate:STRING,status:STRING,date_created:TIMESTAMP,date_modified:TIMESTAMP,source_filename:STRING,error_message:STRING" \
+            --schema "id:STRING,vin:STRING,vehicle_make:STRING,vehicle_model:STRING,dereg_date:DATE,reg_plate:STRING,status:STRING,date_created:TIMESTAMP,date_modified:TIMESTAMP,source_filename:STRING,error_message:STRING" \
             "$$DATASET.$$TABLE"
         else
           tbl_loc="$(bq show --format="value(location)" "$$DATASET.$$TABLE")"
