@@ -2,7 +2,7 @@ substitutions:
   # Region where Cloud Run, Scheduler, and Artifact Registry operate.
   _REGION: australia-southeast1
   # BigQuery staging dataset/table and location.
-  _BQ_STAGE_DATASET: dl_nzta
+  _BQ_STAGE_DATASET: ds_nzta
   _BQ_STAGE_TABLE: dl_all_brands_deregistered_vins_stage
   _BQ_STAGE_LOCATION: australia-southeast1
   # Artifact Registry repository used for versioned images.
