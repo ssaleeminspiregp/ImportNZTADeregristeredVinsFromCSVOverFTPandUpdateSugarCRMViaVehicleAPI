@@ -1,6 +1,10 @@
 substitutions:
   # Region where Cloud Run, Scheduler, and Artifact Registry operate.
   _REGION: australia-southeast1
+  # BigQuery staging dataset/table and location.
+  _BQ_STAGE_DATASET: dl_nzta
+  _BQ_STAGE_TABLE: dl_all_brands_deregistered_vins_stage
+  _BQ_STAGE_LOCATION: australia-southeast1
   # Artifact Registry repository used for versioned images.
   _REPO: all-brands-nzta-deregistered-vins
   # Base image name shared by both Cloud Run services.
@@ -61,7 +65,55 @@ steps:
           gsutil mb -l "$_REGION" "gs://$${BUCKET}"
         fi
 
-  # 3) Guarantee the Pub/Sub topics exist.
+  # 3) Ensure BigQuery dataset/table exist in the target location.
+  - name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        set -euo pipefail
+        DATASET="${_BQ_STAGE_DATASET:-dl_nzta}"
+        TABLE="${_BQ_STAGE_TABLE:-dl_all_brands_deregistered_vins_stage}"
+        LOCATION="${_BQ_STAGE_LOCATION:-australia-southeast1}"
+
+        ds_json="$(bq show --format=prettyjson "$DATASET" 2>/dev/null || true)"
+        if [ -z "$ds_json" ]; then
+          bq --location="$LOCATION" mk --dataset "$DATASET"
+        else
+          ds_loc="$(DS_JSON="$ds_json" python - <<'PY'
+import json, os
+data = json.loads(os.environ["DS_JSON"])
+print(data.get("location", ""))
+PY
+)"
+          if [ -n "$ds_loc" ] && [ "$ds_loc" != "$LOCATION" ]; then
+            echo "Dataset $DATASET exists in $ds_loc; expected $LOCATION" >&2
+            exit 1
+          fi
+        fi
+
+        tbl_json="$(bq show --format=prettyjson "$DATASET.$TABLE" 2>/dev/null || true)"
+        if [ -z "$tbl_json" ]; then
+          bq --location="$LOCATION" mk \
+            --table "$DATASET.$TABLE" \
+            --schema "id:STRING:REQUIRED,vin:STRING,vehicle_make:STRING,vehicle_model:STRING,dereg_date:DATE,reg_plate:STRING,status:STRING,date_created:TIMESTAMP,date_modified:TIMESTAMP,source_filename:STRING,error_message:STRING" \
+            --time_partitioning_type=DAY \
+            --time_partitioning_field=dereg_date \
+            --clustering_fields=vin
+        else
+          tbl_loc="$(TBL_JSON="$tbl_json" python - <<'PY'
+import json, os
+data = json.loads(os.environ["TBL_JSON"])
+print(data.get("location", ""))
+PY
+)"
+          if [ -n "$tbl_loc" ] && [ "$tbl_loc" != "$LOCATION" ]; then
+            echo "Table $DATASET.$TABLE exists in $tbl_loc; expected $LOCATION" >&2
+            exit 1
+          fi
+        fi
+
+  # 4) Guarantee the Pub/Sub topics exist.
   - name: gcr.io/google.com/cloudsdktool/cloud-sdk
     entrypoint: bash
     args:
@@ -73,7 +125,7 @@ steps:
           gcloud pubsub topics create "$topic"
         done
 
-  # 4) Guarantee the DLQ topic exists and Pub/Sub SA can publish to it.
+  # 5) Guarantee the DLQ topic exists and Pub/Sub SA can publish to it.
   - name: gcr.io/google.com/cloudsdktool/cloud-sdk
     entrypoint: bash
     args:
@@ -88,7 +140,7 @@ steps:
           --role="roles/pubsub.publisher" \
           --quiet
 
-  # 4) Build the Cloud Run container image from the current workspace.
+  # 6) Build the Cloud Run container image from the current workspace.
   - name: gcr.io/cloud-builders/docker
     args:
       [
@@ -98,7 +150,7 @@ steps:
         ".",
       ]
 
-  # 5) Push the image to Artifact Registry so Cloud Run can pull it.
+  # 7) Push the image to Artifact Registry so Cloud Run can pull it.
   - name: gcr.io/cloud-builders/docker
     args:
       [
@@ -106,7 +158,7 @@ steps:
         "$_REGION-docker.pkg.dev/adh-data-utopia/$_REPO/$_IMAGE_NAME:$SHORT_SHA",
       ]
 
-  # 6) Deploy (or update) the ingest Cloud Run service.
+  # 8) Deploy (or update) the ingest Cloud Run service.
   - name: gcr.io/google.com/cloudsdktool/cloud-sdk
     entrypoint: gcloud
     args:
@@ -126,7 +178,7 @@ steps:
         "FTP_CONFIG_SECRET=${_FTP_CONFIG_SECRET},SUGAR_CONFIG_SECRET=${_SUGAR_CONFIG_SECRET},FTP_REMOTE_PATH=${_FTP_REMOTE_PATH},FTP_FILE_PATTERN=${_FTP_FILE_PATTERN},GCS_BUCKET=${_GCS_BUCKET},GCS_RAW_PREFIX=${_GCS_RAW_PREFIX},GCS_PROCESSED_PREFIX=${_GCS_PROCESSED_PREFIX},GCS_ERROR_PREFIX=${_GCS_ERROR_PREFIX},ALLOWED_MAKES=${_ALLOWED_MAKES},BQ_STAGE_DATASET=${_BQ_STAGE_DATASET},BQ_STAGE_TABLE=${_BQ_STAGE_TABLE},BQ_STAGE_LOCATION=${_BQ_STAGE_LOCATION},EMAIL_SENDER=${_EMAIL_SENDER},EMAIL_RECIPIENTS=${_EMAIL_RECIPIENTS},SUCCESS_EMAIL_RECIPIENTS=${_SUCCESS_EMAIL_RECIPIENTS},ERROR_EMAIL_RECIPIENTS=${_ERROR_EMAIL_RECIPIENTS},SMTP_HOST=${_SMTP_HOST},SMTP_PORT=${_SMTP_PORT},SMTP_USERNAME=${_SMTP_USERNAME},SMTP_PASSWORD=${_SMTP_PASSWORD},SMTP_USE_TLS=${_SMTP_USE_TLS},SMTP_TIMEOUT=${_SMTP_TIMEOUT},SMTP_DEBUG=${_SMTP_DEBUG},EMAIL_SERVER_CONFIG_SECRET=${_EMAIL_SERVER_CONFIG_SECRET},LOG_LEVEL=${_LOG_LEVEL},SERVICE_MODE=ingest"
       ]
 
-  # 7) Deploy (or update) the sync Cloud Run service.
+  # 9) Deploy (or update) the sync Cloud Run service.
   - name: gcr.io/google.com/cloudsdktool/cloud-sdk
     entrypoint: gcloud
     args:
@@ -146,7 +198,7 @@ steps:
         "FTP_CONFIG_SECRET=${_FTP_CONFIG_SECRET},SUGAR_CONFIG_SECRET=${_SUGAR_CONFIG_SECRET},FTP_REMOTE_PATH=${_FTP_REMOTE_PATH},FTP_FILE_PATTERN=${_FTP_FILE_PATTERN},GCS_BUCKET=${_GCS_BUCKET},GCS_RAW_PREFIX=${_GCS_RAW_PREFIX},GCS_PROCESSED_PREFIX=${_GCS_PROCESSED_PREFIX},GCS_ERROR_PREFIX=${_GCS_ERROR_PREFIX},ALLOWED_MAKES=${_ALLOWED_MAKES},BQ_STAGE_DATASET=${_BQ_STAGE_DATASET},BQ_STAGE_TABLE=${_BQ_STAGE_TABLE},BQ_STAGE_LOCATION=${_BQ_STAGE_LOCATION},EMAIL_SENDER=${_EMAIL_SENDER},EMAIL_RECIPIENTS=${_EMAIL_RECIPIENTS},SUCCESS_EMAIL_RECIPIENTS=${_SUCCESS_EMAIL_RECIPIENTS},ERROR_EMAIL_RECIPIENTS=${_ERROR_EMAIL_RECIPIENTS},SMTP_HOST=${_SMTP_HOST},SMTP_PORT=${_SMTP_PORT},SMTP_USERNAME=${_SMTP_USERNAME},SMTP_PASSWORD=${_SMTP_PASSWORD},SMTP_USE_TLS=${_SMTP_USE_TLS},SMTP_TIMEOUT=${_SMTP_TIMEOUT},SMTP_DEBUG=${_SMTP_DEBUG},EMAIL_SERVER_CONFIG_SECRET=${_EMAIL_SERVER_CONFIG_SECRET},LOG_LEVEL=${_LOG_LEVEL},SERVICE_MODE=sync"
       ]
 
-  # 8) Grant the Pub/Sub push identity invoke rights on both services.
+  # 10) Grant the Pub/Sub push identity invoke rights on both services.
   - name: gcr.io/google.com/cloudsdktool/cloud-sdk
     entrypoint: bash
     args:
@@ -160,7 +212,7 @@ steps:
             --role="roles/run.invoker"
         done
 
-  # 9) Recreate the push subscription pointing to the ingest service URL.
+  # 11) Recreate the push subscription pointing to the ingest service URL.
   - name: gcr.io/google.com/cloudsdktool/cloud-sdk
     entrypoint: bash
     args:
@@ -180,7 +232,7 @@ steps:
           --min-retry-delay="0s" \
           --max-retry-delay="0s"
 
-  # 10) Recreate the push subscription pointing to the sync service URL.
+  # 12) Recreate the push subscription pointing to the sync service URL.
   - name: gcr.io/google.com/cloudsdktool/cloud-sdk
     entrypoint: bash
     args:
@@ -200,7 +252,7 @@ steps:
           --min-retry-delay="0s" \
           --max-retry-delay="0s"
 
-  # 11) Create or update the Scheduler jobs that publish daily triggers.
+  # 13) Create or update the Scheduler jobs that publish daily triggers.
   - name: gcr.io/google.com/cloudsdktool/cloud-sdk
     entrypoint: bash
     args:
